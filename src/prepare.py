@@ -7,11 +7,11 @@
 
 import numpy as np
 from qiskit import QuantumCircuit, transpile, QuantumRegister, ClassicalRegister
-from qiskit.quantum_info import Statevector, Operator
-from qiskit.circuit.library import RYGate, MCXGate, HGate, XGate, QFT
+from qiskit.quantum_info import Statevector
+from qiskit.circuit.library import  XGate
 from qiskit_aer import AerSimulator
-import matplotlib.pyplot as plt
-from qsvt import chebyshev_fit, phase_generator
+
+from qsvt import  phase_generator
 
 def add_ancilla_control(circuit: QuantumCircuit):
     ancilla_reg = QuantumRegister(1, name='ancilla')

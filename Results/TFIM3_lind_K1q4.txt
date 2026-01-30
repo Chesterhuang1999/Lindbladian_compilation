@@ -1,0 +1,85 @@
+Stop criteria satisfied.
+Stop criteria satisfied.
+Stop criteria satisfied.
+Stop criteria satisfied.
+Stop criteria satisfied.
+Stop criteria satisfied.
+Stop criteria satisfied.
+Stop criteria satisfied.
+Stop criteria satisfied.
+Stop criteria satisfied.
+Stop criteria satisfied.
+Stop criteria satisfied.
+Stop criteria satisfied.
+Stop criteria satisfied.
+Stop criteria satisfied.
+Stop criteria satisfied.
+Stop criteria satisfied.
+Stop criteria satisfied.
+Stop criteria satisfied.
+Stop criteria satisfied.
+Stop criteria satisfied.
+Stop criteria satisfied.
+Stop criteria satisfied.
+Stop criteria satisfied.
+Stop criteria satisfied.
+Stop criteria satisfied.
+A_0 construct complete
+A_1 construct complete
+A_2 construct complete
+A_3 construct complete
+A_4 construct complete
+A_5 construct complete
+A_6 construct complete
+Traceback (most recent call last):
+  File "/Users/chester_hqf/Desktop/Research/2025/Lindbladian/Lindbladian_compilation/src/series_expansion.py", line 669, in <module>
+    qc, reg_sizes = higher_order_Lind_expansion(TFIM_lind, K, q, t, K1 = 2)
+                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/chester_hqf/Desktop/Research/2025/Lindbladian/Lindbladian_compilation/src/series_expansion.py", line 497, in higher_order_Lind_expansion
+    qiskit.qasm2.dump(qc_main, f)
+  File "/Users/chester_hqf/miniconda3/envs/qiskit_simulate/lib/python3.12/site-packages/qiskit/qasm2/export.py", line 119, in dump
+    print(dumps(circuit), file=filename_or_stream)  # pylint: disable=bad-builtin
+          ^^^^^^^^^^^^^^
+  File "/Users/chester_hqf/miniconda3/envs/qiskit_simulate/lib/python3.12/site-packages/qiskit/qasm2/export.py", line 185, in dumps
+    instruction_qasm = _custom_operation_statement(instruction, gates_to_define, bit_labels)
+                       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/chester_hqf/miniconda3/envs/qiskit_simulate/lib/python3.12/site-packages/qiskit/qasm2/export.py", line 259, in _custom_operation_statement
+    operation = _define_custom_operation(instruction.operation, gates_to_define)
+                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/chester_hqf/miniconda3/envs/qiskit_simulate/lib/python3.12/site-packages/qiskit/qasm2/export.py", line 281, in _define_custom_operation
+    operation = operation.copy(name=escaped)
+                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/chester_hqf/miniconda3/envs/qiskit_simulate/lib/python3.12/site-packages/qiskit/circuit/instruction.py", line 442, in copy
+    cpy = self.__deepcopy__()
+          ^^^^^^^^^^^^^^^^^^^
+  File "/Users/chester_hqf/miniconda3/envs/qiskit_simulate/lib/python3.12/site-packages/qiskit/circuit/controlledgate.py", line 252, in __deepcopy__
+    cpy._definition = copy.deepcopy(self._definition, memo)
+                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/chester_hqf/miniconda3/envs/qiskit_simulate/lib/python3.12/copy.py", line 143, in deepcopy
+    y = copier(memo)
+        ^^^^^^^^^^^^
+  File "/Users/chester_hqf/miniconda3/envs/qiskit_simulate/lib/python3.12/site-packages/qiskit/circuit/quantumcircuit.py", line 1567, in __deepcopy__
+    result._data = self._data.copy(deepcopy=True)
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/chester_hqf/miniconda3/envs/qiskit_simulate/lib/python3.12/copy.py", line 143, in deepcopy
+    y = copier(memo)
+        ^^^^^^^^^^^^
+  File "/Users/chester_hqf/miniconda3/envs/qiskit_simulate/lib/python3.12/site-packages/qiskit/circuit/library/standard_gates/x.py", line 1045, in __deepcopy__
+    return super().__deepcopy__(memo=memo)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/chester_hqf/miniconda3/envs/qiskit_simulate/lib/python3.12/site-packages/qiskit/circuit/controlledgate.py", line 249, in __deepcopy__
+    cpy = copy.copy(self)
+          ^^^^^^^^^^^^^^^
+  File "/Users/chester_hqf/miniconda3/envs/qiskit_simulate/lib/python3.12/copy.py", line 97, in copy
+    return _reconstruct(x, None, *rv)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/chester_hqf/miniconda3/envs/qiskit_simulate/lib/python3.12/copy.py", line 253, in _reconstruct
+    y = func(*args)
+        ^^^^^^^^^^^
+  File "/Users/chester_hqf/miniconda3/envs/qiskit_simulate/lib/python3.12/copyreg.py", line 99, in __newobj__
+    return cls.__new__(cls, *args)
+           ^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/chester_hqf/miniconda3/envs/qiskit_simulate/lib/python3.12/site-packages/qiskit/circuit/library/standard_gates/x.py", line 870, in __new__
+    return super().__new__(cls)
+           ^^^^^^^^^^^^^^^^^^^^
+KeyboardInterrupt
