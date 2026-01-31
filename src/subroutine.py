@@ -1,4 +1,5 @@
 import numpy as np
+from numpy.polynomial.chebyshev import Chebyshev
 import matplotlib.pyplot as plt
 from copy import deepcopy
 from itertools import combinations
@@ -119,7 +120,7 @@ def controls_on_r(qc_sub: QuantumCircuit, r: int):
  
     return qc
 
-def phase_generator(targ, N, deg):
+def phase_generator(targ, deg):
     """
     Generate phase factors for QSVT to a given matrix.
     """
@@ -133,7 +134,7 @@ def phase_generator(targ, N, deg):
         'epsil': 1e-3,
         'npts': 1000,
         'fscale': 0.99,
-        'isplot': True,
+        'isplot': False,
         'method': 'cvxpy',
         'maxiter': 100,
         'criteria': 1e-12,
@@ -157,17 +158,19 @@ def phase_generator(targ, N, deg):
     
     max_value = np.max(np.abs(func_cheby(x_list)))
     return phi_proc, max_value
-#     func_value = func_cheby(x_list) * max_func
-#     real_func_value = targ(x_list)
-#     value_diff = func_value - real_func_value
-#     QSP_value = get_entry(phi_proc, x_list, out)
-#     err = np.linalg.norm(value_diff, np.inf)
+def get_adaptive_qsp_phases(func, degree):
+    poly = Chebyshev.interpolate(func, degree)
+    coeffs = poly.coef.copy()
+    x_list = np.linspace(-1, 1, 1000)
+    func_cheby = lambda x: chebyshev_to_func(x, coeffs, degree % 2, True)
+    max_value = np.max(np.abs(func_cheby(x_list)))
+    if degree % 2 == 0:
+        coeffs[1::2] = 0.0
+    else:
+        coeffs[0::2] = 0.0
 
-#     real_x_list = np.linspace(-N/2, N/2 - 1, N, dtype = int)
-#     s_list = np.sin(2 * real_x_list / N) 
-#     func_value = func_cheby(s_list)
-#     funcsum = np.sum(func_value**2)
-#     succ_prob = funcsum / N 
+    phases = QuantumSignalProcessingPhases(coeffs, signal_operator="Wx")
+    return phases, max_value
 if __name__ == "__main__":
     
     H = [('ZZI', -1), ('IZZ', -1), ('ZIZ', -1),('XII', -1), ('IXI', -1), ('IIX', -1)]

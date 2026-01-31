@@ -143,7 +143,7 @@ def mulplex_U(mat_list: list, ctrl_size: int, sys_size: int) -> QuantumCircuit:
             qc_pauli.global_phase = np.angle(phase)
             qc_pauli = qc_pauli.decompose()
             U_elem = qc_pauli.to_gate()
-            print(qc_pauli.draw())
+        
         else:
             if ms.shape[0] < 2**sys_size:
                 pad_size = 2**sys_size // ms.shape[0]
@@ -172,12 +172,7 @@ def block_encoding_matrixsum(L: Matrixsum):
     """
     mat_list = []
     coeff_list = []
-    if len(L.instances) == 1:
-        matrix, coeff = L.instances[0]
-        qc_pauli = QuantumCircuit(matrix.size)
-        qc_pauli.append(Pauli(matrix.expr), range(matrix.size))
-        qc_pauli.global_phase += matrix.phase
-        return qc_pauli
+
     for matrix, coeff in L.instances:
         if isinstance(matrix, PauliAtom):
             mat_list.append(SparsePauliOp([matrix.expr], np.array([matrix.phase])))
@@ -186,7 +181,7 @@ def block_encoding_matrixsum(L: Matrixsum):
         coeff_list.append(coeff)
     ctrl_size = int(np.ceil(np.log2(len(coeff_list))))
     sys_size = int(np.log2(mat_list[0].to_operator().dim[0]))
-    
+
     ctrl = QuantumRegister(ctrl_size, 'ctrl')
     sys = QuantumRegister(sys_size, 'sys')
     # qc = QuantumCircuit(sys, ctrl)
@@ -194,9 +189,7 @@ def block_encoding_matrixsum(L: Matrixsum):
     
     qc.compose(mulplex_B(coeff_list, ctrl_size), qubits = ctrl, inplace = True)
     qc.compose(mulplex_U(mat_list, ctrl_size, sys_size), qubits = ctrl[:] + sys[:], inplace = True)
-    
     qc.compose(mulplex_B(coeff_list, ctrl_size).inverse(), qubits = ctrl, inplace = True)
-
     
     return qc
 
@@ -236,7 +229,6 @@ def qsvt_Hamiltonian(J: Matrixsum, t: float, q: int, l: int):
     """
     ### Create the block-encoding of J
     qc_basic = block_encoding_matrixsum(J)
-    # QSVT_basic_instr = qc_basic.to_instruction(label = "QSVT_basic_gadget") 
     
     subnorm_fac = 0
     coeff_list = []
@@ -252,58 +244,53 @@ def qsvt_Hamiltonian(J: Matrixsum, t: float, q: int, l: int):
     
     N = 1000
     deg = 12
-   
-    cos_func = lambda x: np.cos(subnorm_fac * t * x)
-    cos_phi_values, max_value_cos = phase_generator(cos_func, N ,deg)
     
+    cos_func = lambda x: np.cos(subnorm_fac * t * x)
+    # cos_phi_values, max_value_cos = phase_generator(cos_func, deg)
+    cos_phi_values, max_value_cos = get_adaptive_qsp_phases(cos_func, deg)
+
     sin_func = lambda x: np.sin(subnorm_fac * t * x)
   
-    sin_phi_values, max_value_sin = phase_generator(sin_func, N , deg - 1)
-    
-    cos_phi_values[0] += np.pi / 4 #type:ignore
+    # sin_phi_values, max_values_sin = phase_generator(sin_func, deg - 1)
+    sin_phi_values, max_value_sin = get_adaptive_qsp_phases(sin_func, deg - 1)
+
+    cos_phi_values[0] -= np.pi / 4 #type:ignore
     for i in range(1, len(cos_phi_values) - 1):
-        cos_phi_values[i] += np.pi / 2 #type: ignore
-    cos_phi_values[-1] += np.pi / 4 #type: ignore
+        cos_phi_values[i] -= np.pi / 2 #type: ignore
+    cos_phi_values[-1] -= np.pi / 4 #type: ignore
 
-    sin_phi_values[0] +=  np.pi / 4 #type: ignore
-    for i in range(1, len(sin_phi_values) - 1):
-        sin_phi_values[i] += np.pi / 2 #type: ignore
-    sin_phi_values[-1] += np.pi / 4 #type: ignore
-
-    QSVT_basic_gadget = qc_basic.to_gate(label = 'QSVT_basic_gadget')
+   
+    sin_phi_values[0] -= np.pi / 4 #type: ignore
+    for i in range(1, len(sin_phi_values) ):
+        sin_phi_values[i] -= np.pi / 2 #type: ignore
+    sin_phi_values[-1] -=  np.pi / 4 #type: ignore
+    
+    QSVT_basic_gadget = qc_basic.to_gate(label = "QSVT_basic_gadget") 
+    
     
     qc_sin = QuantumCircuit(anc, ctrl, sys)
     qc_cos = QuantumCircuit(anc, ctrl, sys)
-
     qc_sin = apply_poly_phases(sin_phi_values, QSVT_basic_gadget, qc_sin, anc, ctrl)
-    qc_sin.global_phase += - np.pi / 2
+    # qc_sin.global_phase = 0
+    # qc_sin.global_phase += - np.pi / 2
+    
     qc_cos = apply_poly_phases(cos_phi_values, QSVT_basic_gadget, qc_cos, anc, ctrl)
     
     
-    
-    U_ctrl_cos = qc_cos.to_gate().control(num_ctrl_qubits = 1, ctrl_state = '0')
-    U_ctrl_sin = qc_sin.to_gate().control(num_ctrl_qubits = 1, ctrl_state = '1')
-
-    # op_cos = AnnotatedOperation(qc_cos.to_instruction(),
-    #                             ControlModifier(1, '0'))
-    
-    # op_sin = AnnotatedOperation(qc_sin.to_instruction(),
-    #                             ControlModifier(1, '1'))
-                                
-
+    U_ctrl_cos = qc_cos.to_gate().control(1, ctrl_state = '0')
+    U_ctrl_sin = qc_sin.to_gate().control(1, ctrl_state = '1')
     ## Prepare a LCU circuit for e^(iHt) = cos(Ht) - isin(Ht)
     sel = QuantumRegister(1, 'sel')
     qc_main = QuantumCircuit(sel, anc, ctrl, sys) 
-
-    qc_main.ry(np.pi/2, sel) # Prepare coeff (1/sqrt(2), 1/sqrt(2))
-    # qc_main.append(op_cos, qc_main.qubits)
-    # qc_main.append(op_sin, qc_main.qubits)
-
+    qc_main.ry(np.pi / 2, sel) # Prepare coeff (1/sqrt(2), 1/sqrt(2))
+    # qc_main.save_statevector('ini_state')
     qc_main.append(U_ctrl_cos, qc_main.qubits)
     qc_main.append(U_ctrl_sin, qc_main.qubits)
+    qc_main.p(-np.pi / 2 ,sel)
+    qc_main.ry(-np.pi / 2, sel)
 
-    qc_main.ry(-np.pi/2, sel)
 
+   
 
     return qc_main, max_value_cos + max_value_sin
 
@@ -621,8 +608,8 @@ def construct_qobj_lind(Lind: Lindbladian, dim_sys: int):
 if __name__ == "__main__":
     K = 1
     q = 2
-    t = 1
-    test_case = 1
+    t = 0.1
+    test_case = 2
     H = [('ZZI', -1), ('IZZ', -1), ('ZIZ', -1),('XII', -1), ('IXI', -1), ('IIX', -1)]
     gamma = np.sqrt(0.1)/2 
     L_list = [[('XII', gamma), ('YII', -1j * gamma)], [('IXI', gamma), ('IYI', -1j * gamma)], [('IIX', gamma), ('IIY', -1j * gamma)]]
