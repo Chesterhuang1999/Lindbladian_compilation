@@ -2,7 +2,6 @@ import numpy as np
 from qiskit import QuantumCircuit, QuantumRegister, transpile, ClassicalRegister
 from qiskit.quantum_info import Statevector, Operator, DensityMatrix, SparsePauliOp, partial_trace
 from qiskit.circuit.library import UnitaryGate, RYGate, XGate
-import qiskit.qasm2
 from qiskit_aer import  AerSimulator
 from qiskit_aer.library import save_statevector, save_density_matrix
 from qiskit.circuit.annotated_operation import AnnotatedOperation, ControlModifier
@@ -13,7 +12,7 @@ from baseline import simulate_lindblad
 from copy import deepcopy
 
 from numpy.polynomial.legendre import leggauss
-from scipy.linalg import expm, cosm, sinm
+from scipy.linalg import expm
 import itertools
 
 ## Prepare the quadrature points and weights from a series of Legendre polynomials
@@ -51,22 +50,6 @@ def quadrature_points_N_weights(k: int, q: int, t: float, samp_pts:list):
         new_x.append(val)
         new_w.append(weight)
     return new_x, new_w
-
-# def pcphase(phi:float, ctrl:QuantumRegister, sys:QuantumRegister):
-#     qc= QuantumCircuit(ctrl, sys)
-#     if len(ctrl) > 1:
-#         qc.x(ctrl[1:])
-#         qc.mcx(ctrl[1:], ctrl[0])
-#         qc.x(ctrl[1:])
-#         qc.rz(-2 * phi, ctrl[0])
-#     else:
-#         qc.rz(2 * phi, ctrl[0])
-#     if len(ctrl) > 1:
-#         qc.x(ctrl[1:])
-#         qc.mcx(ctrl[1:], ctrl[0])
-#         qc.x(ctrl[1:])
-#     print(qc.draw())
-#     return Operator(qc.to_gate()).data
         
 def lcu_prepare_tree(weights):
     """
@@ -230,11 +213,7 @@ def qsvt_Hamiltonian(J: Matrixsum, t: float, q: int, l: int):
     ### Create the block-encoding of J
     qc_basic = block_encoding_matrixsum(J)
     
-    subnorm_fac = 0
-    coeff_list = []
-    for mat, coeff in J.instances:
-        subnorm_fac += abs(coeff)
-        coeff_list.append(abs(coeff))
+    subnorm_fac = sum(abs(coeff) for _, coeff in J.instances)
     ctrl_size = int(np.ceil(np.log2(J.length)))
     sys_size = J.size
     anc = QuantumRegister(1, 'a')
@@ -243,28 +222,24 @@ def qsvt_Hamiltonian(J: Matrixsum, t: float, q: int, l: int):
     ## An additional ancilla qubit for Hamiltonian evolution e^(-iHt), initialized in |+>
     
     N = 1000
-    deg = 12
+    deg = 4
     
     cos_func = lambda x: np.cos(subnorm_fac * t * x)
-    # cos_phi_values, max_value_cos = phase_generator(cos_func, deg)
     cos_phi_values, max_value_cos = get_adaptive_qsp_phases(cos_func, deg)
 
     sin_func = lambda x: np.sin(subnorm_fac * t * x)
-  
-    # sin_phi_values, max_values_sin = phase_generator(sin_func, deg - 1)
     sin_phi_values, max_value_sin = get_adaptive_qsp_phases(sin_func, deg - 1)
-
-    cos_phi_values[0] -= np.pi / 4 #type:ignore
+    
+    cos_phi_values[0] += np.pi / 4 #type:ignore
     for i in range(1, len(cos_phi_values) - 1):
         cos_phi_values[i] -= np.pi / 2 #type: ignore
-    cos_phi_values[-1] -= np.pi / 4 #type: ignore
+    cos_phi_values[-1] += np.pi / 4 #type: ignore
 
-   
-    sin_phi_values[0] -= np.pi / 4 #type: ignore
+    sin_phi_values[0] += np.pi / 4 #type: ignore
     for i in range(1, len(sin_phi_values) ):
         sin_phi_values[i] -= np.pi / 2 #type: ignore
-    sin_phi_values[-1] -=  np.pi / 4 #type: ignore
-    
+    sin_phi_values[-1] +=  np.pi / 4 #type: ignore
+
     QSVT_basic_gadget = qc_basic.to_gate(label = "QSVT_basic_gadget") 
     
     
@@ -279,18 +254,21 @@ def qsvt_Hamiltonian(J: Matrixsum, t: float, q: int, l: int):
     
     U_ctrl_cos = qc_cos.to_gate().control(1, ctrl_state = '0')
     U_ctrl_sin = qc_sin.to_gate().control(1, ctrl_state = '1')
+    # U_ctrl_cos = qc_cos.to_instruction()
+    # U_ctrl_sin = qc_sin.to_instruction()
     ## Prepare a LCU circuit for e^(iHt) = cos(Ht) - isin(Ht)
     sel = QuantumRegister(1, 'sel')
     qc_main = QuantumCircuit(sel, anc, ctrl, sys) 
     qc_main.ry(np.pi / 2, sel) # Prepare coeff (1/sqrt(2), 1/sqrt(2))
-    # qc_main.save_statevector('ini_state')
+    # qc_main.append(AnnotatedOperation(U_ctrl_cos, ControlModifier(1, '0')), qc_main.qubits)
+    # qc_main.append(AnnotatedOperation(U_ctrl_sin, ControlModifier(1, '1')), qc_main.qubits)
     qc_main.append(U_ctrl_cos, qc_main.qubits)
     qc_main.append(U_ctrl_sin, qc_main.qubits)
     qc_main.p(-np.pi / 2 ,sel)
     qc_main.ry(-np.pi / 2, sel)
 
 
-   
+    qc_main.save_statevector('final_state')
 
     return qc_main, max_value_cos + max_value_sin
 
@@ -460,7 +438,7 @@ def higher_order_Lind_expansion(Lind: Lindbladian, K: int, q: int, t: float, K1:
         weights[i] = nc
     
     qc_prep = lcu_prepare_tree(weights)
-    qc_main.compose(qc_prep, qubits = qc_main.qubits[:sel_size], inplace = True)
+    qc_main.compose(qc_prep, qubits = qc_main.qubits[:sel_size], inplace = True) #type : ignore
     
     
     ### Append A_0 = e^{Jt} circuit
@@ -480,9 +458,7 @@ def higher_order_Lind_expansion(Lind: Lindbladian, K: int, q: int, t: float, K1:
                         + qc_main.qubits[sel_size + ctrl_size_max:])
         print(f"A_{ind} construct complete")
     reg_sizes = [sel_size, ctrl_size_max, sys_size]
-    filename = f'circuits/TFIM_lind_K{K}_q{q}_t{t}.qasm'
-    with open(filename, 'w') as f: 
-        qiskit.qasm2.dump(qc_main, f)
+   
     
     return qc_main, reg_sizes
 
@@ -532,7 +508,7 @@ def projection_vec(sv: Statevector, dim: int, dim0: int):
 def simulate_circuit_qsvt(qc: QuantumCircuit, ini_state):
 
     N = 10000
-    simulator = AerSimulator()
+    simulator = AerSimulator(method = 'statevector')
     ancilla_regs = []
     for qbit in qc.qubits:
         c = qbit._register
@@ -542,23 +518,23 @@ def simulate_circuit_qsvt(qc: QuantumCircuit, ini_state):
 
     qc_sim.initialize(ini_state)
     qc_sim.compose(qc, qc.qubits, qc.clbits, inplace = True)
-
-    qc_sim = transpile(qc_sim, simulator)
-    clbits = qc_sim.num_clbits
     
+    qc_sim = transpile(qc_sim, simulator, optimization_level=1)
+    count = 0
+    for _, qargs, _ in qc_sim.data:
+        if len(qargs) > 1: 
+            count += 1
+    print(count)
     ### Sim task I: Get final statevector
     
     result = simulator.run(qc_sim, shots = 1).result()
 
     final_state = result.data()['final_state']
-
-    final_state_sys, norm = projection_vec(final_state, qc_sim.num_qubits, len(ancilla_regs))
-
-    success_prob = norm
     
-    ### Sim task II: Calculate success probability
+    final_state_sys = normalize(projection_vec(final_state, qc_sim.num_qubits, len(ancilla_regs)))
+
     
-    return final_state_sys, success_prob
+    return final_state_sys
 def simulate_circuit_TN(qc: QuantumCircuit, ini_state: Statevector, reg_sizes: list):
     """
     Construct a tensor network simulation of the circuit qc with initial state ini_state.
@@ -580,7 +556,7 @@ def simulate_circuit_TN(qc: QuantumCircuit, ini_state: Statevector, reg_sizes: l
     with qc_sim.if_test((anc_output, 0)):
         qc_sim.save_density_matrix(qubits = list(range(sel_size)) + list(range(ancilla_size, ancilla_size + sys_size)), label = 'final_sys_dm') # type: ignore
 
-    repeat = 10000
+    repeat = 100
     count = 0
     for i in range(repeat):
         result = simulator.run(qc_sim, shots = 1).result()
@@ -589,7 +565,7 @@ def simulate_circuit_TN(qc: QuantumCircuit, ini_state: Statevector, reg_sizes: l
             raw_rho = result.data()['final_sys_dm']
             final_rho = raw_rho 
     
-
+    
     final_rho_sys = partial_trace(final_rho, list(range(sel_size)))
             
     return final_rho_sys
@@ -615,8 +591,8 @@ if __name__ == "__main__":
     L_list = [[('XII', gamma), ('YII', -1j * gamma)], [('IXI', gamma), ('IYI', -1j * gamma)], [('IIX', gamma), ('IIY', -1j * gamma)]]
     delta_t = 0.1
     TFIM_lind = Lindbladian(H, L_list)
-    if test_case == 1:
 
+    if test_case == 1:
         H = [('YI', -0.5),('XY', -1)]
         L_list = []
         TFIM_lind = Lindbladian(H, L_list)
@@ -624,35 +600,34 @@ if __name__ == "__main__":
         H_evo = Operator(expm(-1j * eff_H.data * t)) #type: ignore
         ini_state = Statevector.from_label('+0')
         final_state_baseline = normalize(ini_state.evolve(H_evo))
-
         qc, max_value = qsvt_Hamiltonian(TFIM_lind.H, t, q, l = 2)
         H_evo_be = Operator(qc.to_gate())
         proj_H_evo_be = projection_op(H_evo_be, qc.num_qubits, qc.num_qubits -TFIM_lind.H.size)
-        
         ini_state = Statevector.from_label('+0' + '0' * (qc.num_qubits - 2))
         final_state_sys = ini_state.evolve(qc)
         final_state_sys = normalize(projection_vec(final_state_sys, qc.num_qubits, qc.num_qubits - TFIM_lind.H.size))
-
         diff = DensityMatrix(final_state_sys) - DensityMatrix(final_state_baseline)
         err = np.linalg.norm(diff, ord = 'nuc') / 2
         print(err)
-
     elif test_case == 2:
+    
         H_eff = TFIM_lind.effective_H()
         qc, max_value = qsvt_Hamiltonian(H_eff, delta_t, q,  2)
+        # print(qc.draw())
         H_evo = Operator(expm(-1j * H_eff.eff_op() * delta_t)) #type: ignore
         ini_state_qsvt = Statevector.from_label('+00' + '0' * (qc.num_qubits - 3)) 
         ini_state_baseline = Statevector.from_label('+00')
         final_state_baseline = normalize(ini_state_baseline.evolve(H_evo))
-        print("Baseline:")
-        print(final_state_baseline)
-        final_state_sys = ini_state_qsvt.evolve(qc)
-        final_state_sys = normalize(projection_vec(final_state_sys, qc.num_qubits, qc.num_qubits - 3))
+        # print("Baseline:")
+        # print(final_state_baseline)
+        final_state_sys = simulate_circuit_qsvt(qc, ini_state_qsvt)
+        
         print("QSVT final state:")
         print(final_state_sys)
         diff = DensityMatrix(final_state_sys) - DensityMatrix(final_state_baseline)
         err = np.linalg.norm(diff, ord = 'nuc') / 2
         print(f"Simulate error: {err}")
+    
     
     elif test_case == 3:
         qc, reg_sizes = higher_order_Lind_expansion(TFIM_lind, K, q, t, K1 = 2)
