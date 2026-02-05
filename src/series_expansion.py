@@ -10,7 +10,7 @@ from channel_IR import *
 from subroutine import *
 from baseline import simulate_lindblad 
 from copy import deepcopy
-
+import time
 from numpy.polynomial.legendre import leggauss
 from scipy.linalg import expm
 import itertools
@@ -51,50 +51,7 @@ def quadrature_points_N_weights(k: int, q: int, t: float, samp_pts:list):
         new_w.append(weight)
     return new_x, new_w
         
-def lcu_prepare_tree(weights):
-    """
-    Prepare the superposition state of LCU coefficients.
-    weights: list of nonnegative numbers, sum(weights) = 1
-    """
-    n = int(np.log2(len(weights)))
-    assert 2**n == len(weights)
 
-    # qc = QuantumCircuit(n)
-
-    def recurse(level, probs):
-        if level == n:  
-            return 
-        
-        half = len(probs) // 2
-
-        p0 = sum(probs[:half])
-        p1 = sum(probs[half:])
-        if p0 + p1 == 0: 
-            return ## Zero-prob branch, nothing to do 
-        theta = 2 * np.arccos(np.sqrt( p0 /(p0 + p1)))
-        t = n - level - 1
-        qc = QuantumCircuit(t + 1)
-        qc.ry(theta, t)
-        
-        # qc.x(t)
-        qc_sub = recurse(level + 1, probs[:half])
-        if qc_sub is not None:
-            qc.x(t)
-            u_sub = qc_sub.to_gate()
-            u_sub = u_sub.control(1, ctrl_state = '1')
-            qc.append(u_sub, [qc.qubits[-1]] + qc.qubits[:-1])
-            qc.x(t)
-        
-        qc_sub = recurse(level + 1, probs[half:])
-        if qc_sub is not None:
-            u_sub = qc_sub.to_gate()
-            u_sub = u_sub.control(1, ctrl_state = '1')
-            qc.append(u_sub, [qc.qubits[-1]] + qc.qubits[:-1])
-        return qc
-    
-    qc = recurse(0, weights)
-
-    return qc
 
 def mulplex_B(coeff_list: list, ctrl_size: int) -> QuantumCircuit:
     """
@@ -115,30 +72,42 @@ def mulplex_U(mat_list: list, ctrl_size: int, sys_size: int) -> QuantumCircuit:
     Create the multiplexed U operator for the LCU circuit.
     mat_list is the list of matrices for each term in the LCU.
     """
+    if ctrl_size == 0:
+        qc = QuantumCircuit(sys_size)
+        assert len(mat_list) == 1
+        pauli_op, phase = mat_list[0].paulis[0], mat_list[0].coeffs[0]
+        qc_pauli = QuantumCircuit(pauli_op.num_qubits)
+        qc_pauli.append(pauli_op, range(pauli_op.num_qubits)) #type: ignore
+        qc_pauli.global_phase = np.angle(phase)
+        qc_pauli = qc_pauli.decompose()
+        return qc_pauli
+    
     qc = QuantumCircuit(ctrl_size + sys_size)
     
     for i, ms in enumerate(mat_list):
         if isinstance(ms, SparsePauliOp):
             pauli_op, phase = ms.paulis[0], ms.coeffs[0]
-
+            
             qc_pauli = QuantumCircuit(pauli_op.num_qubits)
+            
             qc_pauli.append(pauli_op, range(pauli_op.num_qubits)) #type: ignore
             qc_pauli.global_phase = np.angle(phase)
             qc_pauli = qc_pauli.decompose()
             U_elem = qc_pauli.to_gate()
-        
+            
         else:
             if ms.shape[0] < 2**sys_size:
                 pad_size = 2**sys_size // ms.shape[0]
                 ms = np.kron(ms, np.eye(pad_size))
         
         control_values =  bin(i)[2:].zfill(ctrl_size) 
-        if len(qc_pauli.data) > 0: ### Identity is ignored 
+        if len(qc_pauli.data) > 0 : ### Identity is ignored 
 
             ctrl_U_elem = U_elem.control(num_ctrl_qubits = ctrl_size, ctrl_state = control_values)
             qc.append(ctrl_U_elem, range(ctrl_size + sys_size))
+            # qc = qc.decompose()
             # qc.append(ctrl_U_elem, list(range(sys_size, ctrl_size + sys_size)) + list(range(sys_size)))
-            
+    
     return qc
 
 def apply_reflection(qc, qubits):
@@ -155,138 +124,47 @@ def block_encoding_matrixsum(L: Matrixsum):
     """
     mat_list = []
     coeff_list = []
-
+    
+    ## Do type transformation from MatrixSum to operator types compatible with QuantumCircuit type
     for matrix, coeff in L.instances:
         if isinstance(matrix, PauliAtom):
             mat_list.append(SparsePauliOp([matrix.expr], np.array([matrix.phase])))
         else:
             mat_list.append(matrix.to_operator().data)
         coeff_list.append(coeff)
+
     ctrl_size = int(np.ceil(np.log2(len(coeff_list))))
     sys_size = int(np.log2(mat_list[0].to_operator().dim[0]))
-
-    ctrl = QuantumRegister(ctrl_size, 'ctrl')
     sys = QuantumRegister(sys_size, 'sys')
-    # qc = QuantumCircuit(sys, ctrl)
-    qc = QuantumCircuit(ctrl, sys)
+    if ctrl_size == 0:
+        qc = QuantumCircuit(sys)
+        qc.compose(mulplex_U(mat_list, 0, sys_size), qubits = sys[:], inplace = True)
+        return qc
     
+    ctrl =  QuantumRegister(ctrl_size, 'ctrl')
+    qc = QuantumCircuit(ctrl, sys)
     qc.compose(mulplex_B(coeff_list, ctrl_size), qubits = ctrl, inplace = True)
-    qc.compose(mulplex_U(mat_list, ctrl_size, sys_size), qubits = ctrl[:] + sys[:], inplace = True)
+    qc.compose(mulplex_U(mat_list, ctrl_size, sys_size), qubits = qc.qubits, inplace = True)
     qc.compose(mulplex_B(coeff_list, ctrl_size).inverse(), qubits = ctrl, inplace = True)
     
     return qc
 
-def apply_poly_phases(phi_values, gadget, qc: QuantumCircuit, anc, ctrl):
-    """
-    Apply projection-controlled phase rotations to make the QSVT circuit.
-    """
-    qc.h(anc[0])
-
-    for i, phi in enumerate(reversed(phi_values)):
-        if ctrl is not None:
-            qc.x(ctrl)
-            qc.mcx(ctrl, anc[0])
-            # qc.x(ctrl)
-        
-        qc.rz(2 * phi, anc[0])
-        if ctrl is not None: 
-            # qc.x(ctrl)
-            qc.mcx(ctrl, anc[0])
-            qc.x(ctrl)
-
-        if i % 2 == 0 and i != len(phi_values) - 1:
-            qc.append(gadget, qc.qubits[1:])
-         
-        elif i % 2 == 1 and i != len(phi_values) - 1:
-            qc.append(gadget.inverse(), qc.qubits[1:])
-        
-    qc.h(anc[0])
-
-    return qc
-def qsvt_Hamiltonian(J: Matrixsum, t: float, q: int, l: int):
-    """
-    Create the QSVT circuit for the Hamiltonian terms e^-iJt
-    J is the coherent term: J = H - 1/2i sum L^dag L
-    q is number of quadrature points,
-    and l is truncation order for term J.
-    """
-    ### Create the block-encoding of J
-    qc_basic = block_encoding_matrixsum(J)
-    
-    subnorm_fac = sum(abs(coeff) for _, coeff in J.instances)
-    ctrl_size = int(np.ceil(np.log2(J.length)))
-    sys_size = J.size
-    anc = QuantumRegister(1, 'a')
-    ctrl = QuantumRegister(ctrl_size, 'c')
-    sys = QuantumRegister(sys_size, 's')
-    ## An additional ancilla qubit for Hamiltonian evolution e^(-iHt), initialized in |+>
-    
-    N = 1000
-    deg = 4
-    
-    cos_func = lambda x: np.cos(subnorm_fac * t * x)
-    cos_phi_values, max_value_cos = get_adaptive_qsp_phases(cos_func, deg)
-
-    sin_func = lambda x: np.sin(subnorm_fac * t * x)
-    sin_phi_values, max_value_sin = get_adaptive_qsp_phases(sin_func, deg - 1)
-    
-    cos_phi_values[0] += np.pi / 4 #type:ignore
-    for i in range(1, len(cos_phi_values) - 1):
-        cos_phi_values[i] -= np.pi / 2 #type: ignore
-    cos_phi_values[-1] += np.pi / 4 #type: ignore
-
-    sin_phi_values[0] += np.pi / 4 #type: ignore
-    for i in range(1, len(sin_phi_values) ):
-        sin_phi_values[i] -= np.pi / 2 #type: ignore
-    sin_phi_values[-1] +=  np.pi / 4 #type: ignore
-
-    QSVT_basic_gadget = qc_basic.to_gate(label = "QSVT_basic_gadget") 
-    
-    
-    qc_sin = QuantumCircuit(anc, ctrl, sys)
-    qc_cos = QuantumCircuit(anc, ctrl, sys)
-    qc_sin = apply_poly_phases(sin_phi_values, QSVT_basic_gadget, qc_sin, anc, ctrl)
-    # qc_sin.global_phase = 0
-    # qc_sin.global_phase += - np.pi / 2
-    
-    qc_cos = apply_poly_phases(cos_phi_values, QSVT_basic_gadget, qc_cos, anc, ctrl)
-    
-    
-    U_ctrl_cos = qc_cos.to_gate().control(1, ctrl_state = '0')
-    U_ctrl_sin = qc_sin.to_gate().control(1, ctrl_state = '1')
-    # U_ctrl_cos = qc_cos.to_instruction()
-    # U_ctrl_sin = qc_sin.to_instruction()
-    ## Prepare a LCU circuit for e^(iHt) = cos(Ht) - isin(Ht)
-    sel = QuantumRegister(1, 'sel')
-    qc_main = QuantumCircuit(sel, anc, ctrl, sys) 
-    qc_main.ry(np.pi / 2, sel) # Prepare coeff (1/sqrt(2), 1/sqrt(2))
-    # qc_main.append(AnnotatedOperation(U_ctrl_cos, ControlModifier(1, '0')), qc_main.qubits)
-    # qc_main.append(AnnotatedOperation(U_ctrl_sin, ControlModifier(1, '1')), qc_main.qubits)
-    qc_main.append(U_ctrl_cos, qc_main.qubits)
-    qc_main.append(U_ctrl_sin, qc_main.qubits)
-    qc_main.p(-np.pi / 2 ,sel)
-    qc_main.ry(-np.pi / 2, sel)
-
-
-    qc_main.save_statevector('final_state')
-
-    return qc_main, max_value_cos + max_value_sin
 
 
 #### Construct the Lindbladian evolution circuit via higher-order series expansion
 def create_single_kraus(
-        k: int, index: list, L_list: list, 
-        t: float, ctrl_size: int, sys_size:int,
-        K1: int, eff_H: Matrixsum
+        k: int, index: list, L_list: list, K1: int,
+        t: float, ctrl_size: int, sys_size:int, eff_H: Matrixsum
         ):
     """ 
     Create the LCU encoding circuit by 
     Concatenating the block-encoding circuits for 
     each coherent gadget e^{J delta_t} and decay term L_j. 
-    A_j = sqrt(w_(jk) * ... * w_(jk,...j1)) e^J(t - x_(jk))L_(lk)..... L_(l1)
+    A_j = sqrt(w_(jk) * ... * w_(jk,...j1)) e^J(t - x_(jk))L_(lk)e^J(x_(jk)- x_(jk,j_(k-1)))..... L_(l1)e^J(x_(j_k, j_(k-1),...,j_1))
 
     Parameters: 
     k (int): expansion order
+    q (int): number of quadrature points
     index (list): indexes of quadrature points and decay terms
     L_list (list): list of decay terms
     eff_H: effective Hamiltonian J
@@ -302,10 +180,12 @@ def create_single_kraus(
     l_list = index[1: k + 1]
     j_list = index[k + 1: 2 * k + 1]
     coeff_sum_index = 1.0 ## Set coeff sum value
-    ## Generate quadrature points and weights based on 
+
+    ## Generate quadrature points and weights according to a biased Legendre function
     points, weights = quadrature_points_N_weights(k, q, t, j_list)
     points.append(0) ## Add minimum point 0
     weights_prod = np.prod(weights)
+
     ## Mul coefficient 'sqrt(w_(jk) * ... * w_(jk,...j1))'
     coeff_sum_index *= np.sqrt(weights_prod)
     
@@ -322,30 +202,33 @@ def create_single_kraus(
     system_reg = QuantumRegister(sys_size, 'sys')
     qc_elem = QuantumCircuit(total_ctrl_reg, system_reg)
     ctrl_offset = 0
+
     ## Concatenate the block-encoding circuits from back to forth
     for j in range(k + 1):
         ## calculate each time interval
         if j == k:
             delta_t = t - points[0]
         else:
-            delta_t = points[k - j - 1] - points[k - j] ## The
-        
-        ### Concatenate the block-encoding for coherent term e^{J delta_t}
-        qc_C, max_value_C = qsvt_Hamiltonian(eff_H, delta_t, q, K1)
+            delta_t = points[k - j - 1] - points[k - j] 
+
+        ### Concatenate the block-encoding for coherent term e^{J delta_t} = sum_l=0^K1 (J^l t^l/(l!)) 
+        qc_C, coeff_C = construct_circuit_coherent(eff_H, K1, delta_t)
         qc_elem.compose(qc_C, qubits = qc_elem.qubits[ctrl_offset: ctrl_offset + ctrl_reg_size[2 * j]] 
                         + qc_elem.qubits[total_ctrl_size:], inplace = True)
         ctrl_offset += ctrl_reg_size[2 * j]
-        coeff_sum_index *= max_value_C
+        coeff_sum_index *= coeff_C
+
         ### Concatenate the block-encoding for incoherent term L_(l_(k-j))
         if j < k:
             L_j = L_list[l_list[k - j - 1]]
             coeff_sum_index *= L_j.pauli_norm() ## sum of coefficients 
             qc_L = block_encoding_matrixsum(L_j)
-            
             qc_elem.compose(qc_L, qubits = qc_elem.qubits[ctrl_offset: ctrl_offset + ctrl_reg_size[2 * j + 1]] 
                         + qc_elem.qubits[total_ctrl_size:], inplace = True)
             ctrl_offset += ctrl_reg_size[2 * j + 1]
+
     return qc_elem, coeff_sum_index, total_ctrl_size
+
 def create_index_set(k: int, q: int, m: int): 
     """
     Create the index set for the k-th order term in the series expansion.
@@ -353,114 +236,111 @@ def create_index_set(k: int, q: int, m: int):
     """
     index_set = []
     iter_l = itertools.product(range(m), repeat = k)
-    
     for l_is in iter_l: 
         iter_j = itertools.product(range(q), repeat = k)
         for j_is in iter_j: 
             index_set.append([k] + list(l_is) + list(j_is))
 
     return index_set
-def construct_terms_coherent(J: Matrixsum, K1: int, t: float):
-    sum_of_terms = 0
+def construct_circuit_coherent(J: Matrixsum, K1: int, t: float):
+    J.mul_coeffs(-1j)
     sum_of_J = J.identity(J.size)
     for order in range(1, K1 + 1):
         if order == 1: 
-            sum_of_terms += J.length
             product_J = deepcopy(J)
             product_J.mul_coeffs(t)
-            sum_of_J = sum_of_J.add(deepcopy(J))
+            sum_of_J = sum_of_J.add(product_J)
+            
         else: 
             product_J = matsum_mul(product_J, J)
             product_J.mul_coeffs(t / order)
-            sum_of_J.add(product_J)
-            sum_of_terms += product_J.length
-    return sum_of_terms, sum_of_J
-def higher_order_Lind_expansion(Lind: Lindbladian, K: int, q: int, t: float, K1: int = 1):
+            sum_of_J = sum_of_J.add(product_J)
+
+    qc_J = block_encoding_matrixsum(sum_of_J)
+    succ_prob = sum_of_J.pauli_norm()
+    return qc_J, succ_prob
+
+
+def higher_order_Lind_expansion(Lind: Lindbladian, K: int, q: int, t: float, ini_state, K1: int):
     """
     Create the higher-order Lindblad evolution expansion circuit
     using Kth order series expansion with q quadrature points.
     """
     ### Zeroth order term: e^Jt
+    ### Here we just compute H_eff, and J = -iH_eff is incorporated into LCU construction
     effective_H = Lind.effective_H()
     m = len(Lind.L_list)
     sys_size = effective_H.size
     sum_of_kraus = 0
-
-    # length_coherent, approx_eff_H = construct_terms_coherent(effective_H, K1, t)
-    # ctrl_size_coh = int(np.ceil(np.log2(length_coherent)))
-    
     qc_ensemble = []
     coeff_sum_total = []
     ctrl_sizes = []
     ctrl_size_max = 0
     kraus_count = 1
 
-    qc_info = qsvt_Hamiltonian(effective_H, t, q, K1)
+    ### Construct the circuit for A_0 = e^{Jt}
+    qc_info = construct_circuit_coherent(effective_H, K1, t)
     qc_coh_ctrl_size = qc_info[0].num_qubits - sys_size
-    
     coeff_sum_total.append(qc_info[1])
     ctrl_size_max = max(ctrl_size_max, qc_coh_ctrl_size)
     
     ## Prepare the component circuit for each Kraus operator 
     for k in range(1, K + 1):
-        
         index_set_k = create_index_set(k, q, m)
-        
         sum_of_kraus += len(index_set_k)
 
         ## Each Kraus operator is constructed from an index tuple
         for index in index_set_k:
             kraus_count += 1
             assert index[0] == k and len(index) == 2 * k + 1
-            
-            qc_elem, coeff_sum_index, elem_ctrl_size = create_single_kraus(k, index, Lind.L_list, t, 
-                                                    qc_coh_ctrl_size, sys_size, K1, effective_H)
+            qc_elem, coeff_sum_index, elem_ctrl_size = create_single_kraus(k, index, Lind.L_list, K1, t, 
+                                                    qc_coh_ctrl_size, sys_size, effective_H)
             ctrl_size_max = max(elem_ctrl_size, ctrl_size_max)
             qc_ensemble.append(qc_elem)
             coeff_sum_total.append(coeff_sum_index)
             ctrl_sizes.append(elem_ctrl_size)
-   
-    
+    print(f"Total Kraus operators: {kraus_count}")
+
+    #Define the registers
     sel_size = int(np.ceil(np.log2(kraus_count))) 
-    
+    reg_sizes = [sel_size, ctrl_size_max, sys_size]
     select_reg = QuantumRegister(sel_size, 'sel')
     control_reg = QuantumRegister(ctrl_size_max, 'ctrl')
-    
     system_reg = QuantumRegister(sys_size, 'sys')
 
-    qc_main = QuantumCircuit(select_reg, control_reg, system_reg)
-    
     ## Prepare superposition over selection register
     coeff_sum_square = sum([abs(c)**2 for c in coeff_sum_total])
     norm_coeffs = [abs(c)**2 / coeff_sum_square for c in coeff_sum_total]
     weights = np.zeros(2**sel_size, dtype = float)
+    sel_state = np.zeros(2**sel_size, dtype = float)
     for i, nc in enumerate(norm_coeffs):
         weights[i] = nc
-    
-    qc_prep = lcu_prepare_tree(weights)
-    qc_main.compose(qc_prep, qubits = qc_main.qubits[:sel_size], inplace = True) #type : ignore
-    
-    
+        sel_state[i] = np.sqrt(nc)
+    # qc_prep = lcu_prepare_tree(weights)
+    # qc_main.compose(qc_prep, qubits = qc_main.qubits[:sel_size], inplace = True) #type : ignore
+    qc_main = QuantumCircuit(select_reg, control_reg, system_reg)
+    state_sys_ctrl = Statevector.from_label(ini_state + '0' * ctrl_size_max)
+    state_tot = state_sys_ctrl.tensor(Statevector(sel_state))
+    qc_main.initialize(state_tot)
+    print("Selection register prepared")
+
     ### Append A_0 = e^{Jt} circuit
     qc_coh_control = qc_info[0].to_gate().control(num_ctrl_qubits = sel_size, ctrl_state = '0' * sel_size)
     qc_main.append(qc_coh_control, qargs = qc_main.qubits[:sel_size] + qc_main.qubits[sel_size:sel_size + qc_coh_ctrl_size] 
                     + qc_main.qubits[sel_size + ctrl_size_max:])
     print("A_0 construct complete")
-    ### Append each Kraus operator circuit
+
+    ### Append other Kraus operator circuit
     for ind in range(1, kraus_count):
-        
         qc_elem = qc_ensemble[ind -1]
         ctrl_size = ctrl_sizes[ind - 1]
         select_value = bin(ind)[2:].zfill(sel_size)
         qc_elem_control = qc_elem.to_gate().control(num_ctrl_qubits = sel_size, ctrl_state = select_value)
-
         qc_main.append(qc_elem_control, qargs = qc_main.qubits[:sel_size] + qc_main.qubits[sel_size: sel_size + ctrl_size]
                         + qc_main.qubits[sel_size + ctrl_size_max:])
-        print(f"A_{ind} construct complete")
-    reg_sizes = [sel_size, ctrl_size_max, sys_size]
-   
-    
-    return qc_main, reg_sizes
+    print("All Kraus operators constructed")
+
+    return qc_main, reg_sizes, coeff_sum_square
 
 def zero_small_complex(arr, tol=1e-8):
     """
@@ -494,81 +374,100 @@ def projection_op(op: Operator, dim: int, dim0: int):
 
     return Operator(zero_small_complex(projected_op_reduced, tol = 1e-6))
 
-def projection_vec(sv: Statevector, dim: int, dim0: int):
-    proj_0 = Operator.from_label('0' * dim0)
-    iden = Operator.from_label('I' * (dim - dim0))
+def projection_vec(sv: Statevector, dim: int, anc_size: int, ctrls: list):
+    sel_size = anc_size - len(ctrls)
+    print(dim, anc_size, sel_size)
+    proj_0 = Operator.from_label('0' * len(ctrls))
+    if sel_size == 0:
+        iden = Operator.from_label('I' * (dim - anc_size))
+        proj_full = iden.tensor(proj_0)
+        projected_vec = np.dot(proj_full, sv)
+        projected_vec = projected_vec[::2**anc_size]
+        return Statevector(zero_small_complex(projected_vec, tol = 1e-6))
+    else:
+        iden_sel = Operator.from_label('I' * (sel_size))
+        iden_sys = Operator.from_label('I' * (dim - anc_size))
+        proj_full = iden_sys.tensor(proj_0).tensor(iden_sel) 
+        projected_vec = np.dot(proj_full, sv)
+        projected_dm_sys = partial_trace(DensityMatrix(projected_vec), list(range(anc_size)))
+        return DensityMatrix(zero_small_complex(np.asarray(projected_dm_sys), tol = 1e-6))
 
-    proj_full = iden.tensor(proj_0) 
-    projected_vec = np.dot(proj_full, sv)
-
-    projected_vec = projected_vec[::2**dim0]
-
-    return Statevector(zero_small_complex(projected_vec, tol = 1e-6))
-
-def simulate_circuit_qsvt(qc: QuantumCircuit, ini_state):
-
-    N = 10000
+def count_multiq_gates(qc: QuantumCircuit):
+    count = 0
+    countT = 0
+    for gate, qargs, _ in qc.data:
+        if len(qargs) > 1: 
+            count += 1
+        elif gate.name == 't' or gate.name == 'tdg':
+            countT += 1
+    return count, countT
+def simulate_circuit_statevec(qc: QuantumCircuit, reg_sizes = [0, 0, 0]):
     simulator = AerSimulator(method = 'statevector')
     ancilla_regs = []
     for qbit in qc.qubits:
         c = qbit._register
         if c.name != 's':
             ancilla_regs.append(qbit)
-    qc_sim = QuantumCircuit(qc.qubits, qc.clbits)
+    if reg_sizes == [0, 0, 0]:
+        sel_size = 0
+        ctrl_size = len(ancilla_regs)
+        sys_size = qc.num_qubits - ctrl_size
+    else:
+        sel_size, ctrl_size, sys_size = reg_sizes
 
-    qc_sim.initialize(ini_state)
-    qc_sim.compose(qc, qc.qubits, qc.clbits, inplace = True)
+    qc.save_statevector(label = 'final_state')
+    qc = transpile(qc, simulator, optimization_level=2)
     
-    qc_sim = transpile(qc_sim, simulator, optimization_level=1)
-    count = 0
-    for _, qargs, _ in qc_sim.data:
-        if len(qargs) > 1: 
-            count += 1
-    print(count)
     ### Sim task I: Get final statevector
     
-    result = simulator.run(qc_sim, shots = 1).result()
+    result = simulator.run(qc, shots = 1).result()
 
     final_state = result.data()['final_state']
     
-    final_state_sys = normalize(projection_vec(final_state, qc_sim.num_qubits, len(ancilla_regs)))
-
+    final_state_sys = projection_vec(final_state, sel_size + ctrl_size + sys_size, sel_size + ctrl_size, list(range(sel_size, sel_size + ctrl_size)))
     
+
     return final_state_sys
-def simulate_circuit_TN(qc: QuantumCircuit, ini_state: Statevector, reg_sizes: list):
+def simulate_circuit_TN(qc: QuantumCircuit, ini_state: Statevector, reg_sizes: list, return_opt: str = 'full'):
     """
     Construct a tensor network simulation of the circuit qc with initial state ini_state.
     """
     sel_size, ctrl_size, sys_size = reg_sizes
     ancilla_size = sel_size + ctrl_size
     simulator = AerSimulator(method = 'matrix_product_state')
-    simulator.set_options(matrix_product_state_max_bond_dimension=128)
+    simulator.set_options(matrix_product_state_max_bond_dimension=64)
     qc_sim = QuantumCircuit(qc.qubits, qc.clbits)
     qc_sim.initialize(ini_state)
     qc_sim.compose(qc, qc.qubits, qc.clbits, inplace = True)
     
     qc_sim = transpile(qc_sim, simulator, optimization_level = 1)
-    anc_output = ClassicalRegister(ctrl_size, 'c_out')
-    qc_sim.add_register(anc_output)
-    for i in range(ctrl_size):
-        qc_sim.measure(qc_sim.qubits[i + sel_size], anc_output[i])
-   
-    with qc_sim.if_test((anc_output, 0)):
-        qc_sim.save_density_matrix(qubits = list(range(sel_size)) + list(range(ancilla_size, ancilla_size + sys_size)), label = 'final_sys_dm') # type: ignore
-
-    repeat = 100
-    count = 0
-    for i in range(repeat):
+    
+    if return_opt == 'full':
+        qc_sim.save_density_matrix(qubits = list(range(qc_sim.num_qubits)), label = 'final_dm') # type: ignore
         result = simulator.run(qc_sim, shots = 1).result()
-        if list(result.get_counts().keys())[0] == '0'*ctrl_size:
-            count += 1
-            raw_rho = result.data()['final_sys_dm']
-            final_rho = raw_rho 
+        raw_rho = result.data()['final_dm']
+        final_rho = DensityMatrix(normalize(projection_op(raw_rho, qc_sim.num_qubits, ctrl_size))) #type: ignore
+        final_rho_sys = np.asarray(partial_trace(final_rho, list(range(sel_size))))
+        return final_rho_sys
+    else:
+        anc_output = ClassicalRegister(ctrl_size, 'c_out')
+        qc_sim.add_register(anc_output)
+        for i in range(ctrl_size):
+            qc_sim.measure(qc_sim.qubits[i + sel_size], anc_output[i])
     
-    
-    final_rho_sys = partial_trace(final_rho, list(range(sel_size)))
+        with qc_sim.if_test((anc_output, 0)):
+            qc_sim.save_density_matrix(qubits = list(range(ancilla_size, ancilla_size + sys_size)), label = 'final_sys_dm') # type: ignore
             
-    return final_rho_sys
+        repeat = 100
+        for i in range(repeat):
+            result = simulator.run(qc_sim, shots = 1).result()
+            print(result.get_counts())
+            if list(result.get_counts().keys())[0] == '0'*ctrl_size:
+                raw_rho = result.data()['final_sys_dm']
+                break
+        # final_rho_sys = np.asarray(partial_trace(raw_rho, list(range(sel_size))))
+        final_rho_sys = np.asarray(raw_rho)
+        return final_rho_sys
 def construct_qobj_lind(Lind: Lindbladian, dim_sys: int):
     """
     Construct the Qobj representation of the Lindbladian superoperator.
@@ -582,69 +481,95 @@ def construct_qobj_lind(Lind: Lindbladian, dim_sys: int):
     return H_qobj, L_qobj_list
 
 if __name__ == "__main__":
-    K = 1
-    q = 2
+    K = 2
+    q = 4
     t = 0.1
-    test_case = 2
+    test_case = 3
     H = [('ZZI', -1), ('IZZ', -1), ('ZIZ', -1),('XII', -1), ('IXI', -1), ('IIX', -1)]
     gamma = np.sqrt(0.1)/2 
     L_list = [[('XII', gamma), ('YII', -1j * gamma)], [('IXI', gamma), ('IYI', -1j * gamma)], [('IIX', gamma), ('IIY', -1j * gamma)]]
     delta_t = 0.1
     TFIM_lind = Lindbladian(H, L_list)
-
-    if test_case == 1:
-        H = [('YI', -0.5),('XY', -1)]
-        L_list = []
-        TFIM_lind = Lindbladian(H, L_list)
-        eff_H = TFIM_lind.H.eff_op()
-        H_evo = Operator(expm(-1j * eff_H.data * t)) #type: ignore
-        ini_state = Statevector.from_label('+0')
-        final_state_baseline = normalize(ini_state.evolve(H_evo))
-        qc, max_value = qsvt_Hamiltonian(TFIM_lind.H, t, q, l = 2)
-        H_evo_be = Operator(qc.to_gate())
-        proj_H_evo_be = projection_op(H_evo_be, qc.num_qubits, qc.num_qubits -TFIM_lind.H.size)
-        ini_state = Statevector.from_label('+0' + '0' * (qc.num_qubits - 2))
-        final_state_sys = ini_state.evolve(qc)
-        final_state_sys = normalize(projection_vec(final_state_sys, qc.num_qubits, qc.num_qubits - TFIM_lind.H.size))
-        diff = DensityMatrix(final_state_sys) - DensityMatrix(final_state_baseline)
-        err = np.linalg.norm(diff, ord = 'nuc') / 2
-        print(err)
-    elif test_case == 2:
-    
+  
+    if test_case == 2:
+        H = [('Z', 1j)]
+        L = []
+        TFIM_lind = Lindbladian(H, L)
         H_eff = TFIM_lind.effective_H()
-        qc, max_value = qsvt_Hamiltonian(H_eff, delta_t, q,  2)
-        # print(qc.draw())
+        print(H_eff)
+        qc, max_value = qsvt_Hamiltonian(H_eff, delta_t)
+        qc_n = QuantumCircuit(qc.num_qubits)
+
+        start = time.time()
         H_evo = Operator(expm(-1j * H_eff.eff_op() * delta_t)) #type: ignore
-        ini_state_qsvt = Statevector.from_label('+00' + '0' * (qc.num_qubits - 3)) 
-        ini_state_baseline = Statevector.from_label('+00')
+        ini_state_qsvt = Statevector.from_label('+' + '0' * (qc.num_qubits - 1)) 
+        ini_state_baseline = Statevector.from_label('+')
         final_state_baseline = normalize(ini_state_baseline.evolve(H_evo))
-        # print("Baseline:")
-        # print(final_state_baseline)
-        final_state_sys = simulate_circuit_qsvt(qc, ini_state_qsvt)
-        
+        print("Baseline final state:")
+        print(final_state_baseline)
+        qc_n.initialize(ini_state_qsvt)
+        qc_n.compose(qc, qc_n.qubits, inplace = True)
+    
+        final_state_sys = simulate_circuit_statevec(qc_n, reg_sizes = [0, qc.num_qubits - 1, 1])
         print("QSVT final state:")
         print(final_state_sys)
+        end = time.time()
+        print(f"QSVT simulation time: {end - start} seconds")
+        
         diff = DensityMatrix(final_state_sys) - DensityMatrix(final_state_baseline)
         err = np.linalg.norm(diff, ord = 'nuc') / 2
         print(f"Simulate error: {err}")
     
-    
     elif test_case == 3:
-        qc, reg_sizes = higher_order_Lind_expansion(TFIM_lind, K, q, t, K1 = 2)
-        print("Circuit model:",qc.draw())
-        print("Size of circuit:", reg_sizes)
-        ini_state = Statevector.from_label('+00' + '0' * (reg_sizes[0] + reg_sizes[1]))
-        final_dens_sys = simulate_circuit_TN(qc, ini_state, reg_sizes)
+        # weights = [0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0, 0, 0, 0, 0, 0]
+        # statevec = Statevector([np.sqrt(w) for w in weights])
+        # qc_prep = lcu_prepare_tree(weights)
+        # qc = QuantumCircuit(7)
+        # qc.compose(qc_prep, qc.qubits[:4], inplace = True)
+        # print(qc.draw())
+        # ini_state = Statevector.from_label('0000000')
+        # print(ini_state.evolve(qc))
+
+        # qc = QuantumCircuit(7)
+        # state1 = Statevector.from_label('000')
+        # state1 = statevec.tensor(state1)
+        # ini_state = Statevector.from_label('0000000')
+        # qc.append(StatePreparation(state1), qc.qubits)
+        # state2 = ini_state.evolve(qc)
+        # err = np.linalg.norm(DensityMatrix(state1) - DensityMatrix(state2), ord = 'nuc') / 2
+        # print(f"Simulate error: {err}")
+       
+
+        H = [('I', 1)]
+        v = 0.5
+        t = 0.1
+        K1 = 5
+        L_list = [[('X', np.sqrt(v + 1)), ('Y', 1j * np.sqrt(v + 1))], [('X', np.sqrt(v)), ('Y', -1j * np.sqrt(v))]]
+        decay_lind = Lindbladian(H, L_list)
         
-        print("Simulated final density:", final_dens_sys)
-        H_qobj, L_qobj_list = construct_qobj_lind(TFIM_lind, TFIM_lind.H.size)
+   
+        ini_state = Statevector.from_label('+')
+        H_qobj, L_qobj_list = construct_qobj_lind(decay_lind, decay_lind.H.size)
         qplus = (basis(2,0) + basis(2,1)).unit()
+        ini_state_qobj = qplus
+        final_dens = simulate_lindblad(H_qobj, L_qobj_list, ini_state_qobj, t, r = 10)
+        print("Baseline final density:", final_dens)
         
-        ini_state_qobj = tensor(qplus, basis(2, 0), basis(2,0))
+        qc, reg_sizes, coeff_sum_sq = higher_order_Lind_expansion(decay_lind, K, q, t, '+', K1)
+        print(reg_sizes)
+        qc_n = QuantumCircuit(qc.num_qubits)
+        ini_state_sim = Statevector.from_label('+' + '0' * (qc.num_qubits - 1))
+        qc_n.initialize(ini_state_sim)
+        qc_n.compose(qc, qc_n.qubits, inplace = True)
+
+        final_state_sys = simulate_circuit_statevec(qc_n, reg_sizes = reg_sizes)
+        final_state_sys = coeff_sum_sq * final_state_sys 
+        # final_dens_sys = simulate_circuit_TN(qc, ini_state, reg_sizes, 'measure')
+        
+        # print("Simulated final density:", DensityMatrix(final_dens_sys))
     
         
-        final_dens = simulate_lindblad(H_qobj, L_qobj_list, ini_state_qobj, delta_t, r = 10)
+        diff = final_state_sys - final_dens
+        err = np.linalg.norm(diff, ord = 'nuc') / 2
+        print(f"Simulate error: {err}")
         
-        purity = np.trace(final_dens@final_dens)
-        
-        print("Baseline final density:", final_dens)

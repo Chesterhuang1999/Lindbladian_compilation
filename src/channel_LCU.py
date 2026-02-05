@@ -141,7 +141,7 @@ def multiplexed_U(ctrl_size: int, select_size: int, sys_size: int, mats: list):
     ## Size of unitaries 
     rows = len(mats)
     qubit_size_tot = ctrl_size + select_size + sys_size
-    # qc_comp = QuantumCircuit(ctrl_qubits, select_qubits, sys_qubits)
+    
     qc_comp = QuantumCircuit(qubit_size_tot)
     ## Generating multiplexed U by iterating over control values. 
     for i in range(rows):
@@ -159,7 +159,6 @@ def multiplexed_U(ctrl_size: int, select_size: int, sys_size: int, mats: list):
                 if mats[i][j].shape[0] < 2**sys_size:
                     pad_size = 2**sys_size // mats[i][j].shape[0]
                     mats[i][j] = np.kron(mats[i][j], np.eye(pad_size))
-            
                 U_elem = UnitaryGate(mats[i][j])
 
             control_values =  bin(i)[2:].zfill(select_size) + bin(j)[2:].zfill(ctrl_size) 
@@ -167,7 +166,6 @@ def multiplexed_U(ctrl_size: int, select_size: int, sys_size: int, mats: list):
                 ctrl_U_elem = U_elem.control(num_ctrl_qubits = ctrl_size + select_size, ctrl_state = control_values)
                 qc_comp.append(ctrl_U_elem, range(qubit_size_tot))
                 
-    
     return qc_comp
 
 def multiplexed_B(ctrl_size:int, select_size: int, coeffs: list):
@@ -185,19 +183,14 @@ def multiplexed_B(ctrl_size:int, select_size: int, coeffs: list):
         ### Prepare k subroutines: B_sub_j |0> = 1/sqrt(s_j) sum_k sqrt(a_{jk}) |k>
         ### coeffs_i: [a_{ik}]
         coeffs_i = coeffs[i]
-        
         norm_i = np.sqrt(sum([abs(c) for c in coeffs_i]))
-        
         normalized_coeffs_i = [np.sqrt(c) / norm_i for c in coeffs_i]
-        
         state_vector = np.zeros(2**ctrl_size, dtype=complex)
         for j in range(cols):
             state_vector[j] = normalized_coeffs_i[j]
         
         state_vector = Statevector(state_vector)
-        
         qc_temp = QuantumCircuit(ctrl_size)
-        
         qc_temp.append(StatePreparation(state_vector), range(ctrl_size))
 
         control_values = bin(i)[2:].zfill(select_size)

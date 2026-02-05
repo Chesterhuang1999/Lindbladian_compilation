@@ -171,6 +171,13 @@ class Matrixsum:
 
         return Matrixsum(new_instances)
     
+    def remove_iden(self):
+        iden_coeff = 0.0
+        for inst, c in self.instances:
+            if isinstance(inst, PauliAtom) and inst.expr == 'I' * inst.size:
+                self.instances.remove((inst, c))
+                iden_coeff += c * inst.phase
+        return iden_coeff
     def __repr__(self):
         repr_str = "Matrixsum:\n"
         for inst, coeff in self.instances:

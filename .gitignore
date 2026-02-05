@@ -1,5 +1,5 @@
 *.md
-*.pyc
-/src/__pycache__/
+*.cpython-312.pyc
+/src/__pycache__/*
 /src/series_expansion_old.py
 /Outdated/

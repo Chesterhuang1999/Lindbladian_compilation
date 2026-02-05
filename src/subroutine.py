@@ -158,6 +158,7 @@ def phase_generator(targ, deg):
     
     max_value = np.max(np.abs(func_cheby(x_list)))
     return phi_proc, max_value
+
 def get_adaptive_qsp_phases(func, degree):
     poly = Chebyshev.interpolate(func, degree)
     coeffs = poly.coef.copy()
@@ -171,6 +172,137 @@ def get_adaptive_qsp_phases(func, degree):
 
     phases = QuantumSignalProcessingPhases(coeffs, signal_operator="Wx")
     return phases, max_value
+
+def lcu_prepare_tree(weights):
+    """
+    Prepare the superposition state of LCU coefficients.
+    weights: list of nonnegative numbers, sum(weights) = 1
+    """
+    n = int(np.log2(len(weights)))
+    assert 2**n == len(weights)
+
+    # qc = QuantumCircuit(n)
+    
+    def recurse(level, probs):
+        if level == n:  
+            return 
+        
+        half = len(probs) // 2
+
+        p0 = sum(probs[:half])
+        p1 = sum(probs[half:])
+        if p0 + p1 == 0: 
+            return ## Zero-prob branch, nothing to do 
+        theta = 2 * np.arccos(np.sqrt( p0 /(p0 + p1)))
+        t = n - level - 1
+        qc = QuantumCircuit(t + 1)
+        qc.ry(theta, t)
+    
+        qc_sub = recurse(level + 1, probs[:half])
+        if qc_sub is not None:
+            qc.x(t)
+            u_sub = qc_sub.to_gate()
+            u_sub = u_sub.control(1, ctrl_state = '1')
+            qc.append(u_sub, [qc.qubits[-1]] + qc.qubits[:-1])
+            qc.x(t)
+        
+        qc_sub = recurse(level + 1, probs[half:])
+        if qc_sub is not None:
+            u_sub = qc_sub.to_gate()
+            u_sub = u_sub.control(1, ctrl_state = '1')
+            qc.append(u_sub, [qc.qubits[-1]] + qc.qubits[:-1])
+        return qc
+    
+    qc = recurse(0, weights)
+    
+    return qc
+
+def apply_poly_phases(phi_values, gadget, qc: QuantumCircuit, anc, ctrl):
+    """
+    Apply projection-controlled phase rotations to make the QSVT circuit.
+    """
+    qc.h(anc[0])
+    for i, phi in enumerate(reversed(phi_values)):
+        if ctrl is not None:
+            qc.x(ctrl)
+            qc.mcx(ctrl, anc[0])
+        qc.rz(2 * phi, anc[0])
+        if ctrl is not None: 
+            qc.mcx(ctrl, anc[0])
+            qc.x(ctrl)
+        if i % 2 == 0 and i != len(phi_values) - 1:
+            qc.append(gadget, qc.qubits[1:])
+         
+        elif i % 2 == 1 and i != len(phi_values) - 1:
+            qc.append(gadget.inverse(), qc.qubits[1:])
+    qc.h(anc[0])
+
+    return qc
+def qsvt_Hamiltonian(J: Matrixsum, t: float):
+    """
+    Create the QSVT circuit for the Hamiltonian terms e^-iJt
+    J is the coherent term: J = H - 1/2i sum L^dag L
+    q is number of quadrature points,
+    and l is truncation order for term J.
+    """
+    ### Create the block-encoding of J
+    qc_basic = block_encoding_matrixsum(J)
+    subnorm_fac = sum(abs(coeff) for _, coeff in J.instances)
+    sys_size = J.size
+    ctrl_size = qc_basic.num_qubits - sys_size
+    anc = QuantumRegister(1, 'a')
+    if ctrl_size > 0:
+        ctrl = QuantumRegister(ctrl_size, 'c')
+    sys = QuantumRegister(sys_size, 's')
+
+    ### Compute phase polynomials 
+    deg = 4
+    cos_func = lambda x: np.cos(subnorm_fac * t * x)
+    cos_phi_values, max_value_cos = get_adaptive_qsp_phases(cos_func, deg)
+    sin_func = lambda x: np.sin(subnorm_fac * t * x)
+    sin_phi_values, max_value_sin = get_adaptive_qsp_phases(sin_func, deg - 1)
+    
+    cos_phi_values[0] += np.pi / 4 #type:ignore
+    for i in range(1, len(cos_phi_values) - 1):
+        cos_phi_values[i] -= np.pi / 2 #type: ignore
+    cos_phi_values[-1] += np.pi / 4 #type: ignore
+
+    sin_phi_values[0] += np.pi / 4 #type: ignore
+    for i in range(1, len(sin_phi_values)):
+        sin_phi_values[i] -= np.pi / 2 #type: ignore
+    sin_phi_values[-1] +=  np.pi / 4 #type: ignore
+
+    QSVT_basic_gadget = qc_basic.to_gate(label = "QSVT_basic_gadget") 
+    
+    if ctrl_size == 0:
+        qc_sin = QuantumCircuit(anc, sys)
+        qc_cos = QuantumCircuit(anc, sys)
+        qc_sin = apply_poly_phases(sin_phi_values, QSVT_basic_gadget, qc_sin, anc, None)
+        qc_cos = apply_poly_phases(cos_phi_values, QSVT_basic_gadget, qc_cos, anc, None)
+    else:
+        qc_sin = QuantumCircuit(anc, ctrl, sys)
+        qc_cos = QuantumCircuit(anc, ctrl, sys)
+        qc_sin = apply_poly_phases(sin_phi_values, QSVT_basic_gadget, qc_sin, anc, ctrl)
+        qc_cos = apply_poly_phases(cos_phi_values, QSVT_basic_gadget, qc_cos, anc, ctrl)
+    U_ctrl_cos = qc_cos.to_gate().control(1, ctrl_state = '0')
+    U_ctrl_sin = qc_sin.to_gate().control(1, ctrl_state = '1')
+  
+    ## Prepare a LCU circuit for e^(iHt) = cos(Ht) - isin(Ht)
+    ## An additional ancilla qubit for Hamiltonian evolution e^(-iHt), initialized in |+>
+    sel = QuantumRegister(1, 'sel')
+    if ctrl_size == 0:
+        qc_main = QuantumCircuit(sel, anc, sys)
+    else:
+        qc_main = QuantumCircuit(sel, anc, ctrl, sys) 
+    qc_main.ry(np.pi / 2, sel) # Prepare coeff (1/sqrt(2), 1/sqrt(2))
+    qc_main.append(U_ctrl_cos, qc_main.qubits)
+    qc_main.append(U_ctrl_sin, qc_main.qubits)
+    qc_main.p(-np.pi / 2 ,sel)
+    qc_main.ry(-np.pi / 2, sel)
+
+    return qc_main, max_value_cos + max_value_sin
+
+
 if __name__ == "__main__":
     
     H = [('ZZI', -1), ('IZZ', -1), ('ZIZ', -1),('XII', -1), ('IXI', -1), ('IIX', -1)]
