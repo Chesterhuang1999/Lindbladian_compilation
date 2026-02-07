@@ -6,9 +6,6 @@
 
 #########################
 
-
-
-
 import numpy as np
 from qiskit import QuantumCircuit, QuantumRegister, transpile, ClassicalRegister
 from qiskit.quantum_info import Statevector, Operator
@@ -319,7 +316,6 @@ def simulate(circuit: QuantumCircuit, ini_state: Statevector):
         qc_test.measure(i, creg[i])
     result = simulator.run(qc_test, shots = N, initial_state=ini_state).result()
     success_prob = result.get_counts()['00'] / N
-    print(success_prob)
     return success_prob, final_sv
 
 if __name__ == "__main__":

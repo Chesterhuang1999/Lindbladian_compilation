@@ -1,13 +1,12 @@
 import numpy as np
 from qiskit import QuantumCircuit, QuantumRegister, transpile, ClassicalRegister
-from qiskit.quantum_info import Statevector, Operator, DensityMatrix, SparsePauliOp, partial_trace
-from qiskit.circuit.library import UnitaryGate, RYGate, XGate
-from qiskit_aer import  AerSimulator
+from qiskit.quantum_info import Statevector, Operator, DensityMatrix, partial_trace
+from qiskit_aer import AerSimulator
 from qiskit_aer.library import save_statevector, save_density_matrix
-from qiskit.circuit.annotated_operation import AnnotatedOperation, ControlModifier
 from qutip import Qobj, tensor, basis
 from channel_IR import *
 from subroutine import *
+from block_encoding import BlockEncoding
 from baseline import simulate_lindblad 
 from copy import deepcopy
 import time
@@ -50,106 +49,6 @@ def quadrature_points_N_weights(k: int, q: int, t: float, samp_pts:list):
         new_x.append(val)
         new_w.append(weight)
     return new_x, new_w
-        
-
-
-def mulplex_B(coeff_list: list, ctrl_size: int) -> QuantumCircuit:
-    """
-    Create the multiplexed B operator for the LCU circuit.
-    coeff_list is the list of coefficients for each term in the LCU.
-    """
-    sum_coeff = sum([abs(c) for c in coeff_list])
-    norm_coeffs = [abs(c)/sum_coeff for c in coeff_list]
-    probs = np.zeros(2**ctrl_size, dtype = float)
-    for i, nc in enumerate(norm_coeffs):
-        probs[i] = nc
-    
-    qc = lcu_prepare_tree(probs) 
-    return qc #type: ignore
-
-def mulplex_U(mat_list: list, ctrl_size: int, sys_size: int) -> QuantumCircuit:
-    """
-    Create the multiplexed U operator for the LCU circuit.
-    mat_list is the list of matrices for each term in the LCU.
-    """
-    if ctrl_size == 0:
-        qc = QuantumCircuit(sys_size)
-        assert len(mat_list) == 1
-        pauli_op, phase = mat_list[0].paulis[0], mat_list[0].coeffs[0]
-        qc_pauli = QuantumCircuit(pauli_op.num_qubits)
-        qc_pauli.append(pauli_op, range(pauli_op.num_qubits)) #type: ignore
-        qc_pauli.global_phase = np.angle(phase)
-        qc_pauli = qc_pauli.decompose()
-        return qc_pauli
-    
-    qc = QuantumCircuit(ctrl_size + sys_size)
-    
-    for i, ms in enumerate(mat_list):
-        if isinstance(ms, SparsePauliOp):
-            pauli_op, phase = ms.paulis[0], ms.coeffs[0]
-            
-            qc_pauli = QuantumCircuit(pauli_op.num_qubits)
-            
-            qc_pauli.append(pauli_op, range(pauli_op.num_qubits)) #type: ignore
-            qc_pauli.global_phase = np.angle(phase)
-            qc_pauli = qc_pauli.decompose()
-            U_elem = qc_pauli.to_gate()
-            
-        else:
-            if ms.shape[0] < 2**sys_size:
-                pad_size = 2**sys_size // ms.shape[0]
-                ms = np.kron(ms, np.eye(pad_size))
-        
-        control_values =  bin(i)[2:].zfill(ctrl_size) 
-        if len(qc_pauli.data) > 0 : ### Identity is ignored 
-
-            ctrl_U_elem = U_elem.control(num_ctrl_qubits = ctrl_size, ctrl_state = control_values)
-            qc.append(ctrl_U_elem, range(ctrl_size + sys_size))
-            # qc = qc.decompose()
-            # qc.append(ctrl_U_elem, list(range(sys_size, ctrl_size + sys_size)) + list(range(sys_size)))
-    
-    return qc
-
-def apply_reflection(qc, qubits):
-    qc.x(qubits)
-    qc.h(qubits[-1])
-    qc.mcx(qubits[:-1], qubits[-1])
-    qc.h(qubits[-1])
-    qc.x(qubits)
-def block_encoding_matrixsum(L: Matrixsum):
-    """
-    Create the block-encoding circuit for the matrixsum term L.
-    L can be the incoherent operator L_j, or the basic block-encoding gadget H in 
-    the QSVT implementation of Hamiltonian simulation e^{Jt}. 
-    """
-    mat_list = []
-    coeff_list = []
-    
-    ## Do type transformation from MatrixSum to operator types compatible with QuantumCircuit type
-    for matrix, coeff in L.instances:
-        if isinstance(matrix, PauliAtom):
-            mat_list.append(SparsePauliOp([matrix.expr], np.array([matrix.phase])))
-        else:
-            mat_list.append(matrix.to_operator().data)
-        coeff_list.append(coeff)
-
-    ctrl_size = int(np.ceil(np.log2(len(coeff_list))))
-    sys_size = int(np.log2(mat_list[0].to_operator().dim[0]))
-    sys = QuantumRegister(sys_size, 'sys')
-    if ctrl_size == 0:
-        qc = QuantumCircuit(sys)
-        qc.compose(mulplex_U(mat_list, 0, sys_size), qubits = sys[:], inplace = True)
-        return qc
-    
-    ctrl =  QuantumRegister(ctrl_size, 'ctrl')
-    qc = QuantumCircuit(ctrl, sys)
-    qc.compose(mulplex_B(coeff_list, ctrl_size), qubits = ctrl, inplace = True)
-    qc.compose(mulplex_U(mat_list, ctrl_size, sys_size), qubits = qc.qubits, inplace = True)
-    qc.compose(mulplex_B(coeff_list, ctrl_size).inverse(), qubits = ctrl, inplace = True)
-    
-    return qc
-
-
 
 #### Construct the Lindbladian evolution circuit via higher-order series expansion
 def create_single_kraus(
@@ -222,7 +121,7 @@ def create_single_kraus(
         if j < k:
             L_j = L_list[l_list[k - j - 1]]
             coeff_sum_index *= L_j.pauli_norm() ## sum of coefficients 
-            qc_L = block_encoding_matrixsum(L_j)
+            qc_L = BlockEncoding(L_j).circuit()
             qc_elem.compose(qc_L, qubits = qc_elem.qubits[ctrl_offset: ctrl_offset + ctrl_reg_size[2 * j + 1]] 
                         + qc_elem.qubits[total_ctrl_size:], inplace = True)
             ctrl_offset += ctrl_reg_size[2 * j + 1]
@@ -240,8 +139,8 @@ def create_index_set(k: int, q: int, m: int):
         iter_j = itertools.product(range(q), repeat = k)
         for j_is in iter_j: 
             index_set.append([k] + list(l_is) + list(j_is))
-
     return index_set
+
 def construct_circuit_coherent(J: Matrixsum, K1: int, t: float):
     J.mul_coeffs(-1j)
     sum_of_J = J.identity(J.size)
@@ -256,7 +155,8 @@ def construct_circuit_coherent(J: Matrixsum, K1: int, t: float):
             product_J.mul_coeffs(t / order)
             sum_of_J = sum_of_J.add(product_J)
 
-    qc_J = block_encoding_matrixsum(sum_of_J)
+    # qc_J = block_encoding_matrixsum(sum_of_J)
+    qc_J = BlockEncoding(sum_of_J).circuit()
     succ_prob = sum_of_J.pauli_norm()
     return qc_J, succ_prob
 
@@ -392,15 +292,7 @@ def projection_vec(sv: Statevector, dim: int, anc_size: int, ctrls: list):
         projected_dm_sys = partial_trace(DensityMatrix(projected_vec), list(range(anc_size)))
         return DensityMatrix(zero_small_complex(np.asarray(projected_dm_sys), tol = 1e-6))
 
-def count_multiq_gates(qc: QuantumCircuit):
-    count = 0
-    countT = 0
-    for gate, qargs, _ in qc.data:
-        if len(qargs) > 1: 
-            count += 1
-        elif gate.name == 't' or gate.name == 'tdg':
-            countT += 1
-    return count, countT
+
 def simulate_circuit_statevec(qc: QuantumCircuit, reg_sizes = [0, 0, 0]):
     simulator = AerSimulator(method = 'statevector')
     ancilla_regs = []

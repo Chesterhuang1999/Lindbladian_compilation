@@ -217,6 +217,15 @@ def lcu_prepare_tree(weights):
     
     return qc
 
+def count_multiq_gates(qc: QuantumCircuit):
+    count = 0
+    countT = 0
+    for gate, qargs, _ in qc.data:
+        if len(qargs) > 1: 
+            count += 1
+        elif gate.name == 't' or gate.name == 'tdg':
+            countT += 1
+    return count, countT
 def apply_poly_phases(phi_values, gadget, qc: QuantumCircuit, anc, ctrl):
     """
     Apply projection-controlled phase rotations to make the QSVT circuit.
@@ -302,7 +311,26 @@ def qsvt_Hamiltonian(J: Matrixsum, t: float):
 
     return qc_main, max_value_cos + max_value_sin
 
+def prep_sup_state(coeffs: list) -> QuantumCircuit:
+    """
+    Prepare a superposition state |psi> = sum_j sqrt{c_j} |j>
+    where coeffs = [c_0, c_1, ..., c_{M-1}]
+    """
+    M = len(coeffs)
+    norm = np.sqrt(sum([abs(c)**2 for c in coeffs]))
+    normalized_coeffs = [c / norm for c in coeffs]
+    
+    # Create the statevector
+    qubit_length = int(np.ceil(np.log2(M)))
+    state_vector = np.zeros(2**qubit_length, dtype=complex)
+    for j in range(M):
+        state_vector[j] = normalized_coeffs[j]
 
+    state_vector = Statevector(state_vector)
+    qc = QuantumCircuit(qubit_length)
+    prep_gate = StatePreparation(state_vector)
+    qc.append(prep_gate, range(qubit_length))
+    return qc
 if __name__ == "__main__":
     
     H = [('ZZI', -1), ('IZZ', -1), ('ZIZ', -1),('XII', -1), ('IXI', -1), ('IIX', -1)]

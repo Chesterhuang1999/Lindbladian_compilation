@@ -288,6 +288,86 @@ class channel_ensemble:
                 self.size = inst.size
             self.channels.append((probs[i], channel))
 
+    # def __init__(self, Lind: Lindbladian, choices : str, delta_t: float):
+    #     self.Lind = Lind
+    #     self.Hamiltonian = self.Lind.H
+    #     self.L_list = self.Lind.L_list
+    #     self.t = delta_t
+    #     self.choices = choices
+
+    #     self.channels = self.to_channels()
+
+    # def to_channels(self):
+    #     if self.choices == 'basic':
+    #         return self.to_channel_basic_LCU()
+    #     elif self.choices == 'series':
+    #         pass
+
+    # def to_channel_basic_LCU(self):
+    #     sqdelta = np.sqrt(self.t)
+    #     channels = []
+    #     iden = PauliAtom('I' * self.Hamiltonian.size, phase = 1.0)
+    #     kraus_0_basis = Matrixsum([(iden, 1.0)])
+
+    #     H_copy = deepcopy(self.Hamiltonian)
+    #     H_copy.mul_coeffs(-1j* self.t)
+    #     kraus_0_basis = kraus_0_basis.add(H_copy)
+
+    #     Ls_copy = []
+    #     for Ls in self.L_list:
+    #         Ls_copy.append(deepcopy(Ls))
+    #     for i in range(len(Ls_copy)):
+    #         Ls_product = matsum_mul(Ls_copy[i].adj(), Ls_copy[i])
+    #         Ls_product.mul_coeffs(-0.5 * self.t)
+    #         kraus_0_basis = kraus_0_basis.add(Ls_product)
+        
+    #     channels.append(kraus_0_basis)
+    #     for Ls in self.L_list:
+    #         Ls_copy_2 = deepcopy(Ls)
+    #         Ls_copy_2.mul_coeffs(sqdelta)
+    #         channels.append(Ls_copy_2)
+
+    #     ### Calculate the success prob here
+    #     coeff_sq = 0.0
+    #     coeff_sq = np.sum([ms.pauli_norm()**2 for ms in channels])
+    #     success_prob_th = 1 / coeff_sq
+    #     self.succ_prob = success_prob_th
+    #     # c = channel_ensemble([channels])
+        
+    #     return channels
+    # def to_channel_
+    # def channels_to_circuit(self):
+    #     if self.choices == 'basic':
+    #         qc, qubit_regs = self.to_circuit_basic_LCU()
+
+    # def to_circuit_basic_LCU(self):
+    #     coeff_sums = [ms.pauli_norm() for ms in channel]
+    #     ctrl = QuantumRegister(ctrl_size, 'c')
+    #     select = QuantumRegister(select_size, 's')
+    #     sys = QuantumRegister(sys_size, 'sys')
+    #     qc = QuantumCircuit(select, ctrl, sys)
+    #     ## Prepare the superposition state 
+    #     LCU_ini = prep_sup_state(coeff_sums)
+    #     qc.compose(LCU_ini, qubits=list(range(select_size)), inplace=True) 
+    #     ## First construct elementary block encodings then select them using select register. 
+    #     for i, ms in enumerate(channel):
+    #         ctrl_value = bin(i)[2:].zfill(select_size)
+    #         qc_be_ms = BlockEncoding(ms).circuit()
+    #         ctrl_size_ms = qc_be_ms.num_qubits - sys_size
+    #         U_be_ms = qc_be_ms.to_gate().control(num_ctrl_qubits=select_size, ctrl_state=ctrl_value)
+    #         qc.append(U_be_ms, qargs = list(select) + list(ctrl[:ctrl_size_ms]) + list(sys))
+        
+    #     qc.save_statevector('final_state') #type: ignore
+
+    #     qubit_regs = [ctrl, select, sys]
+    #     return [qc, qubit_regs]
+    # def get_gate_counts(self):
+    #     pass
+    # def get_block_counts(self): 
+    #     pass
+    # def get_qubit_width(self):
+    #     pass
+        
 if __name__ == "__main__":
     A = -1j * np.array([[np.exp(-1j * np.pi/4),0],[0, np.exp(1j * np.pi/4)]])
     pa1 = PauliAtom('XIZ', phase=1.0)
