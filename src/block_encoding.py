@@ -5,7 +5,7 @@ from qiskit.circuit.library import StatePreparation
 from subroutine import lcu_prepare_tree, count_multiq_gates
 import numpy as np
 from qiskit_aer import AerSimulator
-
+from qiskit.circuit.controlledgate import ControlledGate
 class BlockEncoding:
     """
     Block Encoding Class for a given Matrixsum Operator J.
@@ -59,6 +59,15 @@ class BlockEncoding:
 
         tcount = mccount * t_count_per_toffoli
         return qc, tcount, mccount
+    @staticmethod
+    def _count_ctrl_qubits(qc: QuantumCircuit):
+        total = 0
+        for inst, _, _  in qc.data:
+            if isinstance(inst, ControlledGate):
+                total += inst.num_ctrl_qubits
+            else:
+                total += getattr(inst, 'num_ctrl_qubits', 0)
+        return total
     def mulplex_B(self, coeff_list, ctrl_size):
         sum_coeff = sum([abs(c) for c in coeff_list])
         norm_coeffs = [abs(c)/sum_coeff for c in coeff_list]
@@ -67,8 +76,12 @@ class BlockEncoding:
         for i, nc in enumerate(norm_coeffs):
             probs[i] = nc
             amps[i] = np.sqrt(nc)
-
+        
         qc = lcu_prepare_tree(probs) 
+        if self.mccount == 0:
+            self.mccount = self._count_ctrl_qubits(qc)
+        else:
+            self.mccount += self._count_ctrl_qubits(qc)  
         return qc #type: ignore
     def circuit(self):
         """
@@ -84,12 +97,13 @@ class BlockEncoding:
         ctrl = QuantumRegister(self.ctrl_size, 'ctrl')
         sys = QuantumRegister(self.sys_size, 'sys')
         qc = QuantumCircuit(ctrl, sys)
+        self.mccount = 0
         qc_u, tcount, mccount = self.mulplex_U(self.mat_list, self.ctrl_size, self.sys_size)
         qc.compose(self.mulplex_B(self.coeff_list, self.ctrl_size), qubits=ctrl, inplace=True) #type: ignore
         qc.compose(qc_u, qubits=qc.qubits, inplace=True)
         qc.compose(self.mulplex_B(self.coeff_list, self.ctrl_size).inverse(), qubits=ctrl, inplace=True) #type: ignore
         self.tcount = tcount
-        self.mccount = mccount
+        self.mccount += mccount
         self.succ_prob = np.sum(self.coeff_list)
         return qc
 

@@ -1,20 +1,22 @@
 import numpy as np
 from numpy.polynomial.chebyshev import Chebyshev
-import matplotlib.pyplot as plt
+
 from copy import deepcopy
 from itertools import combinations
 import sympy as sp
 from qiskit import QuantumCircuit, QuantumRegister, transpile
 from qiskit.quantum_info import Statevector, Operator, SparsePauliOp, Pauli
-from qiskit.circuit.library import UnitaryGate, TGate, RZGate, HGate, C3XGate, StatePreparation, CHGate, XGate
+from qiskit.circuit.library import StatePreparation, XGate
 from qiskit_aer import noise, AerSimulator
-from qiskit_aer.library import save_statevector, set_statevector
 
-from qsppack.utils import cvx_poly_coef, chebyshev_to_func, get_entry
+from qsppack.utils import cvx_poly_coef, chebyshev_to_func
 from qsppack.solver import solve
-import pennylane as qml
 from channel_IR import * 
 from pyqsp.angle_sequence import QuantumSignalProcessingPhases
+
+from numpy.polynomial.legendre import leggauss
+
+import itertools
 def probs_from_lindblad(Lind: Lindbladian):
     
     delt = sp.symbols('delta_t', real = True, positive = True)
@@ -331,6 +333,71 @@ def prep_sup_state(coeffs: list) -> QuantumCircuit:
     prep_gate = StatePreparation(state_vector)
     qc.append(prep_gate, range(qubit_length))
     return qc
+
+def exp_term_expansion(J: Matrixsum, K: int, t: float):
+    J.mul_coeffs(-1j)
+    sum_of_J = J.identity(J.size)
+    for order in range(1, K + 1):
+        if order == 1: 
+            product_J = deepcopy(J)
+            product_J.mul_coeffs(t)
+            sum_of_J = sum_of_J.add(product_J)
+            
+        else: 
+            product_J = matsum_mul(product_J, J)
+            product_J.mul_coeffs(t / order)
+            sum_of_J = sum_of_J.add(product_J)
+    # succ_prob = sum_of_J.pauli_norm()
+    return sum_of_J, sum_of_J.pauli_norm()
+
+def create_index_set(k: int, q: int, m: int): 
+    """
+    Create the index set for the k-th order term in the series expansion.
+    The tuple is [k, l1...lk, j1...jk], l1... lk in [0, m-1], j1...jk in [0, q-1]
+    """
+    index_set = []
+    iter_l = itertools.product(range(m), repeat = k)
+    for l_is in iter_l: 
+        iter_j = itertools.product(range(q), repeat = k)
+        for j_is in iter_j: 
+            index_set.append([k] + list(l_is) + list(j_is))
+    return index_set
+
+def leg_vals(q, t):
+    ### Prepare interpolation points and coeffs for the series expansion
+
+    x_ori, w_ori = leggauss(q)
+
+    ### Zeropoint and gaussian weights of scaled legendre polynomials
+    x = np.array([t/2 * (xi + 1) for xi in x_ori])
+    w = np.array([wi * t/2 for wi in w_ori])
+    return x, w
+def quadrature_points_N_weights(k: int, q: int, t: float, samp_pts:list):
+    """
+    Prepare the quadrature points and weights 
+    according to the interval indicators samp_pts, i.e. the values of j1.... jk
+    """
+    x, w = leg_vals(q, t)
+    assert len(samp_pts) == k
+    ### Now, create the canonical quadratue points and weights:
+    ### val_(j_k) = x_(j_k), weight_(j_k) = w_(j_k) j_k = 1....q
+    ### val_(j_k, ...,j_(k-l)) = x_(j_(k-l)) * ... * x_(j_k) / t^(l), weight_(j_k, ...,j_(k-l)) = w_(j_(k-l)) * ... * w_(j_k) / t^(l)
+    
+    ### There are k points 
+    new_x = []
+    new_w = []
+    for i, ind in enumerate(samp_pts):
+        if i == 0:
+            val = x[ind]
+            weight = w[ind]
+        else: 
+            weight = val * w[ind] / t 
+            val = val * x[ind] / t
+            
+        new_x.append(val)
+        new_w.append(weight)
+    return new_x, new_w
+
 if __name__ == "__main__":
     
     H = [('ZZI', -1), ('IZZ', -1), ('ZIZ', -1),('XII', -1), ('IXI', -1), ('IIX', -1)]

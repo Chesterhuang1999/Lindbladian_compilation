@@ -259,7 +259,13 @@ class Lindbladian:
             L_dag_L.mul_coeffs(-0.5j)
             H_eff = H_eff.add(L_dag_L)
         return H_eff
-    
+    def __size__(self):
+        if self.H.size > 0:
+            return self.H.size
+        elif len(self.L_list) > 0:
+            return max([L.size for L in self.L_list])
+        else:
+            return 0
 class channel_ensemble:
     """
     A intermediate representation for the (probabilistic ensemble) of quantum channels.

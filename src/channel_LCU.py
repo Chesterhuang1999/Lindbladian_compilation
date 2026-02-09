@@ -430,6 +430,8 @@ def construct_qobj_lind(Lind: Lindbladian, dim_sys: int):
         L_qobj_list.append(Qobj(L.eff_op(), dims = [[2] * dim_sys, [2] * dim_sys]))
     
     return H_qobj, L_qobj_list
+
+
 def simulate_circuit(circuit: QuantumCircuit, ini_state: Statevector, qubit_regs: list, duration: float = 0.1, r: int = 10):
     N = 100000
     simulator = AerSimulator()

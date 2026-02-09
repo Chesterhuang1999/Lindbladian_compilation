@@ -226,6 +226,7 @@ def oblivious_AA(qc_main:QuantumCircuit, qc_sub, qubit_regs):
     qc_main.compose(qc_sub, inplace = True)
     qc_main.global_phase += np.pi
     return qc_main
+
 def channel_to_trajectory_rand (Lind, time: float, epsilon: float) -> QuantumCircuit:
     """
     Convert the channel to LCU circuit with random sampling method
@@ -234,16 +235,18 @@ def channel_to_trajectory_rand (Lind, time: float, epsilon: float) -> QuantumCir
     pauli_norm = Lind.pauli_norm()
     tau = int(np.ceil(2* pauli_norm * time))
     r = int(np.pow(2, np.ceil(np.log2(tau / epsilon))))
+    
     delta_t = time / (r * tau)
     p = 1 - 2 * pauli_norm * delta_t
     ensem , H_length = lindblad_to_rand_channels(Lind, delta_t)
-
+    print(tau, r, delta_t, p)
+    print(tau/epsilon)
+    exit(0)
     assert len(ensem.channels) > 1
     channels = ensem.channels
     probs = [ch[0] for ch in channels]
     # channel_ops = [ch[1] for ch in channels]
     
-
     ## Set parameters 
    
     sys_size = ensem.size 
@@ -275,10 +278,9 @@ def channel_to_trajectory_rand (Lind, time: float, epsilon: float) -> QuantumCir
             else:
                 selected_ops = Lind.L_list[rand_ind - H_length] ## Matrixsum
             
-            # op = 1j * delta_t * pauli_norm * Operator.from_label(selected_ops[0].expr) 
-            # op = Operator.from_label('I' * sys_size) + op 
+            
             ini_state = Statevector.from_label('0' * sys_size)
-            # print(op @ ini_state)
+            
             sub_qc = channel_to_LCU_det(selected_ops, pauli_norm, delta_t, is_Ham, sub_circ_size)
             
             temp_value1 = r + control_size * k2
@@ -319,15 +321,24 @@ def simulate(circuit: QuantumCircuit, ini_state: Statevector):
     return success_prob, final_sv
 
 if __name__ == "__main__":
-    H = [('ZZI', -1), ('IZZ', -1), ('ZIZ', -1),('XII', -1), ('IXI', -1), ('IIX', -1)]
-    gamma = np.sqrt(0.1)/2 
-    L_list = [[('XII', gamma), ('YII', -1j * gamma)], [('IXI', gamma), ('IYI', -1j * gamma)], [('IIX', gamma), ('IIY', -1j * gamma)]]
-    delta_t = 0.1
-    TFIM_lind = Lindbladian(H, L_list)
+    # H = [('ZZI', -1), ('IZZ', -1), ('ZIZ', -1),('XII', -1), ('IXI', -1), ('IIX', -1)]
+    # gamma = np.sqrt(0.1)/2 
+    # L_list = [[('XII', gamma), ('YII', -1j * gamma)], [('IXI', gamma), ('IYI', -1j * gamma)], [('IIX', gamma), ('IIY', -1j * gamma)]]
+    # delta_t = 0.1
+    # TFIM_lind = Lindbladian(H, L_list)
 
-    TFIM_qc_exe = channel_to_trajectory_rand(TFIM_lind, 0.1, 0.01)
+    # TFIM_qc_exe = channel_to_trajectory_rand(TFIM_lind, 0.1, 0.01)
+    H = [('I', 1)]
+    v = 0.5
+    t = 0.1
+    K1 = 5
+    L_list = [[('X', np.sqrt(v + 1)), ('Y', 1j * np.sqrt(v + 1))], [('X', np.sqrt(v)), ('Y', -1j * np.sqrt(v))]]
+    decay_lind = Lindbladian(H, L_list)
     # print(TFIM_qc_exe.draw())
-    ini_state = Statevector.from_label('0' * (TFIM_qc_exe.num_qubits))
-    success_prob, final_sv = simulate(TFIM_qc_exe, ini_state)
+    decay_qc_exe = channel_to_trajectory_rand(decay_lind, t, 0.04)
+    ini_state = Statevector.from_label('0' * (decay_qc_exe.num_qubits))
+    success_prob, final_sv = simulate(decay_qc_exe, ini_state)
+    print(success_prob)
+    print(final_sv)
     # print(final_sv / success_prob)
     

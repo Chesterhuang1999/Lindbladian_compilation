@@ -53,7 +53,7 @@ def quadrature_points_N_weights(k: int, q: int, t: float, samp_pts:list):
 #### Construct the Lindbladian evolution circuit via higher-order series expansion
 def create_single_kraus(
         k: int, index: list, L_list: list, K1: int,
-        t: float, ctrl_size: int, sys_size:int, eff_H: Matrixsum
+        t: float, q: int, ctrl_size: int, sys_size:int, eff_H: Matrixsum
         ):
     """ 
     Create the LCU encoding circuit by 
@@ -128,18 +128,7 @@ def create_single_kraus(
 
     return qc_elem, coeff_sum_index, total_ctrl_size
 
-def create_index_set(k: int, q: int, m: int): 
-    """
-    Create the index set for the k-th order term in the series expansion.
-    The tuple is [k, l1...lk, j1...jk], l1... lk in [0, m-1], j1...jk in [0, q-1]
-    """
-    index_set = []
-    iter_l = itertools.product(range(m), repeat = k)
-    for l_is in iter_l: 
-        iter_j = itertools.product(range(q), repeat = k)
-        for j_is in iter_j: 
-            index_set.append([k] + list(l_is) + list(j_is))
-    return index_set
+
 
 def construct_circuit_coherent(J: Matrixsum, K1: int, t: float):
     J.mul_coeffs(-1j)
@@ -161,7 +150,8 @@ def construct_circuit_coherent(J: Matrixsum, K1: int, t: float):
     return qc_J, succ_prob
 
 
-def higher_order_Lind_expansion(Lind: Lindbladian, K: int, q: int, t: float, ini_state, K1: int):
+# def higher_order_Lind_expansion(Lind: Lindbladian, K: int, q: int, t: float, ini_state, K1: int):
+def higher_order_Lind_expansion(Lind: Lindbladian, K: int, q: int, t: float, K1: int):
     """
     Create the higher-order Lindblad evolution expansion circuit
     using Kth order series expansion with q quadrature points.
@@ -193,7 +183,7 @@ def higher_order_Lind_expansion(Lind: Lindbladian, K: int, q: int, t: float, ini
         for index in index_set_k:
             kraus_count += 1
             assert index[0] == k and len(index) == 2 * k + 1
-            qc_elem, coeff_sum_index, elem_ctrl_size = create_single_kraus(k, index, Lind.L_list, K1, t, 
+            qc_elem, coeff_sum_index, elem_ctrl_size = create_single_kraus(k, index, Lind.L_list, K1, t, q,
                                                     qc_coh_ctrl_size, sys_size, effective_H)
             ctrl_size_max = max(elem_ctrl_size, ctrl_size_max)
             qc_ensemble.append(qc_elem)
@@ -216,14 +206,18 @@ def higher_order_Lind_expansion(Lind: Lindbladian, K: int, q: int, t: float, ini
     for i, nc in enumerate(norm_coeffs):
         weights[i] = nc
         sel_state[i] = np.sqrt(nc)
-    # qc_prep = lcu_prepare_tree(weights)
-    # qc_main.compose(qc_prep, qubits = qc_main.qubits[:sel_size], inplace = True) #type : ignore
-    qc_main = QuantumCircuit(select_reg, control_reg, system_reg)
-    state_sys_ctrl = Statevector.from_label(ini_state + '0' * ctrl_size_max)
-    state_tot = state_sys_ctrl.tensor(Statevector(sel_state))
-    qc_main.initialize(state_tot)
-    print("Selection register prepared")
+    
 
+
+    qc_main = QuantumCircuit(select_reg, control_reg, system_reg)
+    
+    # state_sys_ctrl = Statevector.from_label('+' + '0' * ctrl_size_max)
+    # state_tot = state_sys_ctrl.tensor(Statevector(sel_state))
+    
+    # qc_main.initialize(state_tot)
+    
+    # print("Selection register prepared")
+    
     ### Append A_0 = e^{Jt} circuit
     qc_coh_control = qc_info[0].to_gate().control(num_ctrl_qubits = sel_size, ctrl_state = '0' * sel_size)
     qc_main.append(qc_coh_control, qargs = qc_main.qubits[:sel_size] + qc_main.qubits[sel_size:sel_size + qc_coh_ctrl_size] 
@@ -240,7 +234,8 @@ def higher_order_Lind_expansion(Lind: Lindbladian, K: int, q: int, t: float, ini
                         + qc_main.qubits[sel_size + ctrl_size_max:])
     print("All Kraus operators constructed")
 
-    return qc_main, reg_sizes, coeff_sum_square
+    return qc_main, reg_sizes, coeff_sum_square, sel_state
+    # return qc_main, reg_sizes, coeff_sum_square
 
 def zero_small_complex(arr, tol=1e-8):
     """
@@ -293,7 +288,7 @@ def projection_vec(sv: Statevector, dim: int, anc_size: int, ctrls: list):
         return DensityMatrix(zero_small_complex(np.asarray(projected_dm_sys), tol = 1e-6))
 
 
-def simulate_circuit_statevec(qc: QuantumCircuit, reg_sizes = [0, 0, 0]):
+def simulate_circuit_statevec(qc: QuantumCircuit, ini_state, sel_state, reg_sizes = [0, 0, 0]):
     simulator = AerSimulator(method = 'statevector')
     ancilla_regs = []
     for qbit in qc.qubits:
@@ -306,15 +301,30 @@ def simulate_circuit_statevec(qc: QuantumCircuit, reg_sizes = [0, 0, 0]):
         sys_size = qc.num_qubits - ctrl_size
     else:
         sel_size, ctrl_size, sys_size = reg_sizes
-
-    qc.save_statevector(label = 'final_state')
-    qc = transpile(qc, simulator, optimization_level=2)
     
+    qc_sim = QuantumCircuit(qc.num_qubits)
+    state_sys_ctrl = Statevector.from_label(ini_state + '0' * ctrl_size)
+    
+    state_tot = state_sys_ctrl.tensor(Statevector(sel_state))
+    
+    qc_sim.initialize(state_tot)
+    
+   
+    qc_sim.append(qc.to_gate(), qargs = qc_sim.qubits)
+    qc_sim.save_statevector(label = 'final_state') #type: ignore
+    qc_sim = transpile(qc_sim, simulator, optimization_level=2)
+
+    # qc.save_statevector(label = 'final_state')
+    # qc = transpile(qc, simulator, optimization_level=1)
     ### Sim task I: Get final statevector
     
-    result = simulator.run(qc, shots = 1).result()
+    result = simulator.run(qc_sim, shots = 1).result()
 
     final_state = result.data()['final_state']
+
+    # result2 = simulator.run(qc_sim, shots = 1).result()
+    # final_state_sim = result2.data()['final_state']
+    # print(np.linalg.norm(final_state_sim - final_state) / 2)
     
     final_state_sys = projection_vec(final_state, sel_size + ctrl_size + sys_size, sel_size + ctrl_size, list(range(sel_size, sel_size + ctrl_size)))
     
@@ -364,28 +374,34 @@ def construct_qobj_lind(Lind: Lindbladian, dim_sys: int):
     """
     Construct the Qobj representation of the Lindbladian superoperator.
     """
-    H = Lind.H.eff_op()
+    H = Lind.H.eff_op() if Lind.H.eff_op() is not None else np.zeros((2**dim_sys, 2**dim_sys))
+    
     H_qobj = Qobj(H, dims = [[2] * dim_sys, [2] * dim_sys])
     L_qobj_list = []
     for L in Lind.L_list:
         L_qobj_list.append(Qobj(L.eff_op(), dims = [[2] * dim_sys, [2] * dim_sys]))
-    
+   
     return H_qobj, L_qobj_list
 
+def simulate_circuit_repeat(qc: QuantumCircuit, ini_state: Statevector, reg_sizes: list, repeat: int = 4):
+    for j in range(repeat):
+        final_rho_sys = simulate_circuit_TN(qc, ini_state, reg_sizes, return_opt = 'postselect')
+        if final_rho_sys is not None:
+            return final_rho_sys
+    pass
 if __name__ == "__main__":
-    K = 2
-    q = 4
-    t = 0.1
+    
     test_case = 3
-    H = [('ZZI', -1), ('IZZ', -1), ('ZIZ', -1),('XII', -1), ('IXI', -1), ('IIX', -1)]
-    gamma = np.sqrt(0.1)/2 
-    L_list = [[('XII', gamma), ('YII', -1j * gamma)], [('IXI', gamma), ('IYI', -1j * gamma)], [('IIX', gamma), ('IIY', -1j * gamma)]]
-    delta_t = 0.1
-    TFIM_lind = Lindbladian(H, L_list)
+    
   
     if test_case == 2:
+        H = [('ZZI', -1), ('IZZ', -1), ('ZIZ', -1),('XII', -1), ('IXI', -1), ('IIX', -1)]
+        gamma = np.sqrt(0.1)/2 
+        L_list = [[('XII', gamma), ('YII', -1j * gamma)], [('IXI', gamma), ('IYI', -1j * gamma)], [('IIX', gamma), ('IIY', -1j * gamma)]]
+        TFIM_lind = Lindbladian(H, L_list)
         H = [('Z', 1j)]
         L = []
+        delta_t = 0.1
         TFIM_lind = Lindbladian(H, L)
         H_eff = TFIM_lind.effective_H()
         print(H_eff)
@@ -413,48 +429,35 @@ if __name__ == "__main__":
         print(f"Simulate error: {err}")
     
     elif test_case == 3:
-        # weights = [0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0, 0, 0, 0, 0, 0]
-        # statevec = Statevector([np.sqrt(w) for w in weights])
-        # qc_prep = lcu_prepare_tree(weights)
-        # qc = QuantumCircuit(7)
-        # qc.compose(qc_prep, qc.qubits[:4], inplace = True)
-        # print(qc.draw())
-        # ini_state = Statevector.from_label('0000000')
-        # print(ini_state.evolve(qc))
-
-        # qc = QuantumCircuit(7)
-        # state1 = Statevector.from_label('000')
-        # state1 = statevec.tensor(state1)
-        # ini_state = Statevector.from_label('0000000')
-        # qc.append(StatePreparation(state1), qc.qubits)
-        # state2 = ini_state.evolve(qc)
-        # err = np.linalg.norm(DensityMatrix(state1) - DensityMatrix(state2), ord = 'nuc') / 2
-        # print(f"Simulate error: {err}")
-       
-
-        H = [('I', 1)]
-        v = 0.5
+        H = []
+        K = 2
+        q = 4
         t = 0.1
+        v = 0.5
         K1 = 5
-        L_list = [[('X', np.sqrt(v + 1)), ('Y', 1j * np.sqrt(v + 1))], [('X', np.sqrt(v)), ('Y', -1j * np.sqrt(v))]]
+        scaling = 4.0
+        L_list = [[('X', np.sqrt(v + 1)/scaling), ('Y', 1j * np.sqrt(v + 1)/scaling)], [('X', np.sqrt(v)/scaling), ('Y', -1j * np.sqrt(v)/scaling)]]
         decay_lind = Lindbladian(H, L_list)
-        
+        print(decay_lind.pauli_norm()) 
    
         ini_state = Statevector.from_label('+')
-        H_qobj, L_qobj_list = construct_qobj_lind(decay_lind, decay_lind.H.size)
+        H_qobj, L_qobj_list = construct_qobj_lind(decay_lind, decay_lind.__size__())
         qplus = (basis(2,0) + basis(2,1)).unit()
         ini_state_qobj = qplus
         final_dens = simulate_lindblad(H_qobj, L_qobj_list, ini_state_qobj, t, r = 10)
         print("Baseline final density:", final_dens)
         
-        qc, reg_sizes, coeff_sum_sq = higher_order_Lind_expansion(decay_lind, K, q, t, '+', K1)
+        qc, reg_sizes, coeff_sum_sq, sel_state = higher_order_Lind_expansion(decay_lind, K, q, t, K1)
+        # qc, reg_sizes, coeff_sum_sq = higher_order_Lind_expansion(decay_lind, K ,q, t, '+', K1)
         print(reg_sizes)
-        qc_n = QuantumCircuit(qc.num_qubits)
-        ini_state_sim = Statevector.from_label('+' + '0' * (qc.num_qubits - 1))
-        qc_n.initialize(ini_state_sim)
-        qc_n.compose(qc, qc_n.qubits, inplace = True)
+        # qc_n = QuantumCircuit(qc.num_qubits)
+        # ini_state_sim = Statevector.from_label('+' + '0' * (qc.num_qubits - 1))
+        # qc_n.initialize(ini_state_sim)
+        # qc_n.compose(qc, qc_n.qubits, inplace = True)
 
-        final_state_sys = simulate_circuit_statevec(qc_n, reg_sizes = reg_sizes)
+        final_state_sys = simulate_circuit_statevec(qc, ini_state = '+', sel_state = sel_state, reg_sizes = reg_sizes)
+        # final_state_sys = simulate_circuit_statevec(qc, ini_state = '+', sel_state = '', reg_sizes = reg_sizes)
+        
         final_state_sys = coeff_sum_sq * final_state_sys 
         # final_dens_sys = simulate_circuit_TN(qc, ini_state, reg_sizes, 'measure')
         
