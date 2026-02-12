@@ -1,16 +1,29 @@
 import numpy as np
 from pyqsp.angle_sequence import QuantumSignalProcessingPhases
-from qiskit import QuantumCircuit, QuantumRegister, ClassicalRegister
-from qiskit.quantum_info import Statevector
+from qiskit import QuantumCircuit, QuantumRegister, ClassicalRegister, transpile
+from qiskit.quantum_info import Statevector, DensityMatrix
 from qiskit_aer import AerSimulator
-from qiskit_aer.library import save_density_matrix, save_statevector
+from qiskit_aer.library import save_density_matrix, save_statevector, SetDensityMatrix
 
-from series_expansion import block_encoding_matrixsum, lcu_prepare_tree
 from channel_IR import * 
 from scipy.linalg import expm
 
 
 if __name__ == "__main__":
+
+    qc = QuantumCircuit(3)
+    dens = DensityMatrix.from_label('+10')
+    qc.append(SetDensityMatrix(dens), [0,1,2])
+    qc.h(0)
+    qc.cx(0, 1)
+    qc.cx(0, 2)
+    ini_state = DensityMatrix.from_label('000')
+    simulator = AerSimulator(method = 'density_matrix')
+    qc = transpile(qc, simulator, optimization_level=1)
+    qc.save_density_matrix(label = 'final_state')
+    result = simulator.run(qc, shots = 1).result()
+    print(result.data()['final_state'])
+    exit(0)
     H = [('ZZI', -1), ('IZZ', -1), ('ZIZ', -1),('XII', -1), ('IXI', -1), ('IIX', -1)]
     gamma = np.sqrt(0.1)/2 
     L_list = [[('XII', gamma), ('YII', -1j * gamma)], [('IXI', gamma), ('IYI', -1j * gamma)], [('IIX', gamma), ('IIY', -1j * gamma)]]

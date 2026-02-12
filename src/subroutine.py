@@ -122,44 +122,44 @@ def controls_on_r(qc_sub: QuantumCircuit, r: int):
  
     return qc
 
-def phase_generator(targ, deg):
-    """
-    Generate phase factors for QSVT to a given matrix.
-    """
+# def phase_generator(targ, deg):
+#     """
+#     Generate phase factors for QSVT to a given matrix.
+#     """
 
-    max_func = np.max(np.abs(targ(np.linspace(-1, 1, 10000))))
-    # func = lambda s: targ(s) / max_func
-    parity = deg % 2
-    opts = {
-        'intervals': [-1, 1],
-        'objnorm': np.inf,
-        'epsil': 1e-3,
-        'npts': 1000,
-        'fscale': 0.99,
-        'isplot': False,
-        'method': 'cvxpy',
-        'maxiter': 100,
-        'criteria': 1e-12,
-        'useReal': True,
-        'targetPre': True,
-        'print': False
-    }
-    coef_full = cvx_poly_coef(targ, deg, opts)
+#     max_func = np.max(np.abs(targ(np.linspace(-1, 1, 10000))))
+#     # func = lambda s: targ(s) / max_func
+#     parity = deg % 2
+#     opts = {
+#         'intervals': [-1, 1],
+#         'objnorm': np.inf,
+#         'epsil': 1e-3,
+#         'npts': 1000,
+#         'fscale': 0.99,
+#         'isplot': False,
+#         'method': 'cvxpy',
+#         'maxiter': 100,
+#         'criteria': 1e-12,
+#         'useReal': True,
+#         'targetPre': True,
+#         'print': False
+#     }
+#     coef_full = cvx_poly_coef(targ, deg, opts)
   
-    coef = coef_full[parity::2]
+#     coef = coef_full[parity::2]
 
-    opts['method'] = 'Newton'
-    phi_proc, out = solve(coef, parity, opts)
+#     opts['method'] = 'Newton'
+#     phi_proc, out = solve(coef, parity, opts)
     
 
    
-#    ## Evaluate the approximation error
-    x_list = np.linspace(-1, 1, 1000)
+# #    ## Evaluate the approximation error
+#     x_list = np.linspace(-1, 1, 1000)
 
-    func_cheby = lambda x: chebyshev_to_func(x, coef, parity, True)
+#     func_cheby = lambda x: chebyshev_to_func(x, coef, parity, True)
     
-    max_value = np.max(np.abs(func_cheby(x_list)))
-    return phi_proc, max_value
+#     max_value = np.max(np.abs(func_cheby(x_list)))
+#     return phi_proc, max_value
 
 def get_adaptive_qsp_phases(func, degree):
     poly = Chebyshev.interpolate(func, degree)
