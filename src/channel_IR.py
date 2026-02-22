@@ -181,7 +181,7 @@ class Matrixsum:
     def __repr__(self):
         repr_str = "Matrixsum:\n"
         for inst, coeff in self.instances:
-            repr_str += f" Coeff: {coeff}, Pauli: {inst.phase}*{inst.expr}" if isinstance(inst, PauliAtom) else f" Coeff: {coeff}, Matrix with phase {inst.phase}\n"
+            repr_str += f" Coeff: {np.round(coeff, 6)}, Pauli: {inst.phase}*{inst.expr}" if isinstance(inst, PauliAtom) else f" Coeff: {np.round(coeff, 6)}, Matrix with phase {inst.phase}\n"
         return repr_str
 
 def matsum_mul(A: Matrixsum, B: Matrixsum) -> Matrixsum:
@@ -266,6 +266,14 @@ class Lindbladian:
             return max([L.size for L in self.L_list])
         else:
             return 0
+        
+    def __repr__(self):
+        repr_str = "Lindbladian:\n"
+        repr_str += f"Hamiltonian:\n{self.H}\n"
+        repr_str += "Lindblad operators:\n"
+        for L in self.L_list:
+            repr_str += f"{L}\n"
+        return repr_str
 class channel_ensemble:
     """
     A intermediate representation for the (probabilistic ensemble) of quantum channels.

@@ -490,7 +490,7 @@ if __name__ == "__main__":
         channel_Lind, success_prob_th, coeff_sum = Lindblad_to_channel(TFIM_lind, delta_t)
 
         channel_Lind = channel_Lind.channels[0][1]
-
+        ms = channel_Lind[0]
         H_qobj, L_qobj_list = construct_qobj_lind(TFIM_lind, dim_sys = 3)  
         
         LCU, qubit_regs = channel_to_LCU(channel_ensemble([channel_Lind]))
@@ -517,7 +517,7 @@ if __name__ == "__main__":
         L_list = [[('XII', gamma), ('YII', -1j * gamma)], [('IXI', gamma), ('IYI', -1j * gamma)], [('IIX', gamma), ('IIY', -1j * gamma)]]
         delta_t = 0.1
         TFIM_lind = Lindbladian(H, L_list)
-     
+
         r = 1
         h = 1
         success_prob_sym = probs_from_lindblad(TFIM_lind)
@@ -563,6 +563,7 @@ if __name__ == "__main__":
         simulator = AerSimulator()
         result = simulator.run(qc, shots = 100000).result()
         counts = result.get_counts()['0']
+        
 
     
    
