@@ -225,7 +225,7 @@ def channel_to_LCU (ensem: channel_ensemble) -> list:
     ## First construct elementary block encodings then select them using select register. 
     for i, ms in enumerate(channel):
         ctrl_value = bin(i)[2:].zfill(select_size)
-        qc_be_ms = BlockEncoding(ms).circuit()
+        qc_be_ms = BlockEncoding(ms).circuit(opt = 'No')
         ctrl_size_ms = qc_be_ms.num_qubits - sys_size
         U_be_ms = qc_be_ms.to_gate().control(num_ctrl_qubits=select_size, ctrl_state=ctrl_value)
         qc.append(U_be_ms, qargs = list(select) + list(ctrl[:ctrl_size_ms]) + list(sys))
