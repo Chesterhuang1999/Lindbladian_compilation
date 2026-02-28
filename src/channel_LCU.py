@@ -484,7 +484,7 @@ if __name__ == "__main__":
         H = [('ZZI', -1), ('IZZ', -1), ('ZIZ', -1),('XII', -1), ('IXI', -1), ('IIX', -1)]
         gamma = np.sqrt(0.1)/2 
         L_list = [[('XII', gamma), ('YII', -1j * gamma)], [('IXI', gamma), ('IYI', -1j * gamma)], [('IIX', gamma), ('IIY', -1j * gamma)]]
-        delta_t = 0.1
+        delta_t = 0.05
         TFIM_lind = Lindbladian(H, L_list)
         
         channel_Lind, success_prob_th, coeff_sum = Lindblad_to_channel(TFIM_lind, delta_t)

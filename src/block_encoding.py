@@ -40,6 +40,7 @@ def greedy_generator_selection(sorted_matrix, max_length = None, max_gens = None
     max_elements = 2 ** max_length if max_length is not None else 1e9
 
     rows_as_bytes = [row.tobytes() for row in sorted_matrix]
+    row_weights = np.sum(sorted_matrix[:, :n] | sorted_matrix[:, n:], axis=1)
     U_set = set(rows_as_bytes)
 
     candidates_indices = list(range(M))
@@ -49,18 +50,14 @@ def greedy_generator_selection(sorted_matrix, max_length = None, max_gens = None
     selected_indices = [first_idx]
 
     identity_vec = np.zeros(N, dtype = int)
-    current_group_elements = {identity_vec.tobytes(), first_vec.tobytes()}
+    current_group_map = {
+        identity_vec.tobytes(): identity_vec,
+        first_vec.tobytes(): first_vec,
+    }
 
     candidates_indices.pop(0)
 
-    current_covered_in_U = {b for b in current_group_elements if b in U_set}
-
-    def get_weight(vec_bytes):
-        vec = np.frombuffer(vec_bytes, dtype = int)
-        x = vec[:n]
-        z = vec[n:]
-        non_identity = x | z
-        return np.sum(non_identity)
+    current_covered_in_U = {b for b in current_group_map if b in U_set}
 
     while candidates_indices:
         if (max_gens and  len(selected_indices) >= max_gens):
@@ -75,17 +72,14 @@ def greedy_generator_selection(sorted_matrix, max_length = None, max_gens = None
 
         for i, idx in enumerate(candidates_indices):
             vec_bytes = rows_as_bytes[idx]
-            if vec_bytes in current_group_elements:
+            if vec_bytes in current_group_map:
                 to_remove.append(i)
                 continue
 
             vec_arr = sorted_matrix[idx]
-            count_delta = 0
             new_covered_chunk = []
 
-            for g_bytes in current_group_elements:
-                g_arr = np.frombuffer(g_bytes, dtype = int)
-
+            for g_arr in current_group_map.values():
                 new_vec = g_arr ^ vec_arr
                 new_vec_bytes = new_vec.tobytes()   
                 if new_vec_bytes in U_set:
@@ -93,7 +87,7 @@ def greedy_generator_selection(sorted_matrix, max_length = None, max_gens = None
                         new_covered_chunk.append(new_vec_bytes)
             
             count_delta = len(new_covered_chunk)
-            wt = get_weight(vec_bytes) 
+            wt = row_weights[idx]
             wt = wt if wt > 0 else 1e-9
             score = count_delta / wt
 
@@ -109,7 +103,6 @@ def greedy_generator_selection(sorted_matrix, max_length = None, max_gens = None
                 best_idx -= 1
 
         if not candidate_found or best_score <= 0:
-            print("No candidate found to expand the group. Stopping selection.")
             break
 
     
@@ -117,13 +110,15 @@ def greedy_generator_selection(sorted_matrix, max_length = None, max_gens = None
         selected_indices.append(target_idx)
 
         target_vec = sorted_matrix[target_idx]
-        new_group_elements = set()
-        for g_bytes in current_group_elements:
-            g_arr = np.frombuffer(g_bytes, dtype = int)
+        new_group_map = {}
+        current_group_values = list(current_group_map.values())
+        for g_arr in current_group_values:
             new_vec = g_arr ^ target_vec
-            new_group_elements.add(new_vec.tobytes())
+            new_vec_bytes = new_vec.tobytes()
+            if new_vec_bytes not in current_group_map:
+                new_group_map[new_vec_bytes] = new_vec
         
-        current_group_elements.update(new_group_elements)
+        current_group_map.update(new_group_map)
         
         if best_new_covered_elements:
             current_covered_in_U.update(best_new_covered_elements)
@@ -131,7 +126,7 @@ def greedy_generator_selection(sorted_matrix, max_length = None, max_gens = None
         ## Stop criterion is evaluated AFTER adding one new generator:
         ## given current subset S, decide whether there is still enough remaining
         ## address capacity to cover currently uncovered targets.
-        current_group_size = len(current_group_elements)
+        current_group_size = len(current_group_map)
         remaining_uncovered = M - len(current_covered_in_U)
         lhs = max_elements - current_group_size
         rhs = remaining_uncovered
@@ -228,6 +223,9 @@ def assign_additional_modes(w, assigned_modes, remaining_tuple):
         z = vec[n:]
         return int(np.sum(x | z))
 
+    def ctrl_hamming_weight(ctrl_value):
+        return ctrl_value.count('1')
+
     if len(remaining_tuple) == 0:
         return assigned_modes
 
@@ -248,7 +246,7 @@ def assign_additional_modes(w, assigned_modes, remaining_tuple):
         basis_candidates = basis_candidates[:d]
 
     mode_bits = w - d
-    if mode_bits <= 0:
+    if mode_bits < 0:
         return assigned_modes
 
     basis_info = []
@@ -282,50 +280,77 @@ def assign_additional_modes(w, assigned_modes, remaining_tuple):
             vec = item
         remaining.append(vec.copy().astype(int))
 
+    assigned_mode_keys = {(mode[0], mode[1]) for mode in assigned_modes}
+
     def append_mode_if_new(label, ctrl_value):
         key = (label, ctrl_value)
-        for mode in assigned_modes:
-            old_label, old_ctrl = mode[0], mode[1]
-            if (old_label, old_ctrl) == key:
-                return
+        if key in assigned_mode_keys:
+            return
         assigned_modes.append((label, ctrl_value))
+        assigned_mode_keys.add(key)
 
     max_modes = 2 ** mode_bits
     zero_coeff_id = '0' * d
     base_subspace_map = {coeff_id: vec for coeff_id, vec in subspace_vectors}
 
     def greedy_assign_coeffs(remaining_vecs, allowed_coeff_ids, effective_subspace_map):
-        ranked_candidates = []
-        for ridx, r_vec in enumerate(remaining_vecs):
-            candidates = []
-            for coeff_id in allowed_coeff_ids:
-                base_vec = effective_subspace_map[coeff_id]
-                toggle_cost = vec_weight(r_vec ^ base_vec)
-                candidates.append((toggle_cost, int(coeff_id, 2), coeff_id))
-            candidates.sort(key=lambda t: (t[0], t[1]))
-            ranked_candidates.append((ridx, candidates))
+        if len(remaining_vecs) == 0 or len(allowed_coeff_ids) == 0:
+            return {}
 
-        used_coeff_ids = set()
+        coeff_ids = list(allowed_coeff_ids)
+        coeff_vecs = np.asarray([effective_subspace_map[cid] for cid in coeff_ids], dtype=np.uint8)
+        rem_vecs = np.asarray(remaining_vecs, dtype=np.uint8)
+
+        n_half = rem_vecs.shape[1] // 2
+        rem_x = rem_vecs[:, :n_half]
+        rem_z = rem_vecs[:, n_half:]
+        coeff_x = coeff_vecs[:, :n_half]
+        coeff_z = coeff_vecs[:, n_half:]
+
+        xor_x = rem_x[:, None, :] ^ coeff_x[None, :, :]
+        xor_z = rem_z[:, None, :] ^ coeff_z[None, :, :]
+        cost_matrix = np.sum(xor_x | xor_z, axis=2)
+
+        used_coeff_mask = np.zeros(len(coeff_ids), dtype=bool)
+        assigned_row_mask = np.zeros(len(remaining_vecs), dtype=bool)
         assignments = {}
+
         while True:
             best_choice = None
-            for ridx, candidates in ranked_candidates:
-                if ridx in assignments:
+            for ridx in range(len(remaining_vecs)):
+                if assigned_row_mask[ridx]:
                     continue
-                for cost, _, coeff_id in candidates:
-                    if coeff_id in used_coeff_ids:
+
+                row_best_coeff_idx = -1
+                row_best_cost = None
+                for coeff_idx in range(len(coeff_ids)):
+                    if used_coeff_mask[coeff_idx]:
                         continue
-                    choice = (cost, int(coeff_id, 2), ridx, coeff_id)
-                    if (best_choice is None) or (choice < best_choice):
-                        best_choice = choice
-                    break
+
+                    cost = int(cost_matrix[ridx, coeff_idx])
+                    if (row_best_cost is None) or (cost < row_best_cost):
+                        row_best_cost = cost
+                        row_best_coeff_idx = coeff_idx
+
+                if row_best_coeff_idx < 0:
+                    continue
+
+                choice = (row_best_cost, row_best_coeff_idx, ridx)
+                if (best_choice is None) or (choice < best_choice):
+                    best_choice = choice
+
             if best_choice is None:
                 break
-            _, _, ridx, coeff_id = best_choice
+
+            _, coeff_idx, ridx = best_choice
+            coeff_id = coeff_ids[coeff_idx]
             assignments[ridx] = coeff_id
-            used_coeff_ids.add(coeff_id)
+            used_coeff_mask[coeff_idx] = True
+            assigned_row_mask[ridx] = True
+
         return assignments
 
+    
     ## Enumerate non-zero modes m in the high bits.
     for mode_int in range(1, max_modes):
         if len(remaining) == 0:
@@ -371,6 +396,49 @@ def assign_additional_modes(w, assigned_modes, remaining_tuple):
             append_mode_if_new(pauli_label, full_ctrl)
 
         remaining = [item for ridx, item in enumerate(remaining) if ridx not in newly_assigned_indices]
+
+    if len(remaining) > 0:
+        ctrl_to_pauli_weight = {}
+        for pauli_label, ctrl_value in assigned_modes:
+            ctrl_to_pauli_weight[ctrl_value] = vec_weight(pauli_to_vec(pauli_label))
+
+        occupied_ctrls = {ctrl for _, ctrl in assigned_modes}
+        all_ctrls = [bin(i)[2:].zfill(w) for i in range(2 ** w)]
+        zero_ctrl = '0' * w
+        free_ctrls = [ctrl for ctrl in all_ctrls if ctrl not in occupied_ctrls and ctrl != zero_ctrl]
+
+        def prefix_assigned_weight_sum(ctrl_value):
+            b_int = int(ctrl_value, 2)
+            accum = 0
+            for l in range(b_int):
+                l_ctrl = bin(l)[2:].zfill(w)
+                accum += ctrl_to_pauli_weight.get(l_ctrl, 0)
+            return accum
+
+        while len(remaining) > 0 and len(free_ctrls) > 0:
+            free_ctrls.sort(
+                key=lambda ctrl: (
+                    ctrl_hamming_weight(ctrl),
+                    prefix_assigned_weight_sum(ctrl),
+                    int(ctrl, 2),
+                )
+            )
+            target_ctrl = free_ctrls.pop(0)
+
+            coeff_id = target_ctrl[-d:] if d > 0 else ''
+            ref_vec = base_subspace_map.get(coeff_id)
+            if ref_vec is None:
+                continue
+
+            best_ridx = min(
+                range(len(remaining)),
+                key=lambda ridx: vec_weight(remaining[ridx] ^ ref_vec)
+            )
+
+            chosen_vec = remaining.pop(best_ridx)
+            chosen_label = vec_to_pauli(chosen_vec)
+            append_mode_if_new(chosen_label, target_ctrl)
+            ctrl_to_pauli_weight[target_ctrl] = vec_weight(pauli_to_vec(chosen_label))
 
     return assigned_modes
 
@@ -717,7 +785,6 @@ class BlockEncoding:
         subspace_modes = assign_subspace_modes(w, selected_matrix, U_covered_new)
         
         additional_modes = assign_additional_modes(w, subspace_modes, remaining_tuple)
-        
         ## Keep an explicit identity slot aligned with self.mat_list terms.
         identity_label = None
         for ms in self.mat_list:
@@ -774,7 +841,7 @@ class BlockEncoding:
         self.vec_phase_lookup = build_vec_phase_lookup(chosen_matrix, chosen_phases)
         self.basis_modes_with_phase, self.nonbasis_modes_with_phase = extract_basis_modes_with_phases(additional_modes, self.vec_phase_lookup)
         self.mobius_phase_result = mobius_invert_modes_with_phases(w, additional_modes, self.vec_phase_lookup)
-       
+        
         return coeff_mode_dict, w
     def mulplex_U_opt_order(self):
         sys_size = self.sys_size
@@ -782,8 +849,11 @@ class BlockEncoding:
         modes_with_phase = self.mobius_phase_result['g_modes_with_phase']
         ctrl_reg, sys_reg = QuantumRegister(ctrl_size, 'ctrl'), QuantumRegister(sys_size, 'sys')
         qc_u = QuantumCircuit(ctrl_reg, sys_reg)
+        mccount = 0
+        cxcount = 0
         self.coeff_list_ordered = np.zeros((1 << ctrl_size), dtype = float)
-        self.coeff_list_ordered[0] = coeff_mode_dict['0' * ctrl_size]
+        if '0' * ctrl_size in coeff_mode_dict:
+            self.coeff_list_ordered[0] = coeff_mode_dict['0' * ctrl_size]
         for pauli_label, ctrl_value, phase in modes_with_phase:
             position = int(ctrl_value, 2)
             self.coeff_list_ordered[position] = coeff_mode_dict[ctrl_value]
@@ -801,27 +871,28 @@ class BlockEncoding:
                 ctrl_U_elem = qc_pauli.to_gate().control(num_ctrl_qubits = len(active_ctrls), ctrl_state = '1' * len(active_ctrls))
                 qargs = active_ctrls + list(range(ctrl_size, ctrl_size + sys_size))
                 qc_u.append(ctrl_U_elem, qargs)
-        tcount = 0
-        mccount = 0
-        cxcount = 0
-        for inst, _, _ in qc_u.data:
-            if isinstance(inst, ControlledGate):
-                if inst.num_ctrl_qubits == 1:
+                if len(active_ctrls) == 1:
                     cxcount += 1
                 else:
-                    mccount += inst.num_ctrl_qubits - 1
-            else:
-                cxcount += getattr(inst, 'num_ctrl_qubits', 0)
+                    mccount += len(active_ctrls) - 1
+
         tcount = mccount * 4
         cxcount += mccount * 4
-        return qc_u, tcount, mccount, cxcount
+        return qc_u, tcount, mccount, cxcount, ctrl_size
             
-    def mulplex_B_opt_order(self):
+    def mulplex_B_opt_order(self, ctrl_size):
         coeff_list_ordered = self.coeff_list_ordered
-        
         sum_coeff = sum([abs(c) for c in coeff_list_ordered])
         norm_coeffs = [abs(c)/sum_coeff for c in coeff_list_ordered]
-        qc = lcu_prepare_tree(norm_coeffs)
+        amps = np.zeros(2**ctrl_size, dtype = float)
+        for i, nc in enumerate(norm_coeffs):
+
+            amps[i] = np.sqrt(nc)
+        
+        # qc = lcu_prepare_tree(probs) 
+        qc = QuantumCircuit(ctrl_size)
+        qc.append(StatePreparation(Statevector(amps)), range(ctrl_size))
+        # qc = lcu_prepare_tree(norm_coeffs)
 
         return qc
     @staticmethod
@@ -849,7 +920,9 @@ class BlockEncoding:
             probs[i] = nc
             amps[i] = np.sqrt(nc)
         
-        qc = lcu_prepare_tree(probs) 
+        # qc = lcu_prepare_tree(probs) 
+        qc = QuantumCircuit(ctrl_size)
+        qc.append(StatePreparation(Statevector(amps)), range(ctrl_size))
       
         return qc #type: ignore
 
@@ -981,9 +1054,10 @@ class BlockEncoding:
             qc.compose(qc_u, qubits = qc.qubits, inplace = True)
             qc.compose(qc_select.inverse(), qubits = ctrl_index, inplace = True) #type: ignore
         elif opt == 'Matrix-order':
-            coeff_mode_dict, ctrl_size = self.find_optimal_order_matrices()
-            qc_u, tcount, mccount, cxcount = self.mulplex_U_opt_order()
-            qc_select = self.mulplex_B_opt_order()
+            # coeff_mode_dict, ctrl_size = self.find_optimal_order_matrices()
+            qc_u, tcount, mccount, cxcount, ctrl_size = self.mulplex_U_opt_order()
+            # qc = qc_u.copy()
+            qc_select = self.mulplex_B_opt_order(ctrl_size)
             ctrl, sys = QuantumRegister(ctrl_size, 'ctrl'), QuantumRegister(self.sys_size, 'sys')
             qc = QuantumCircuit(ctrl, sys, name = "BlockEncoding")
             qc.compose(qc_select, qubits = ctrl, inplace = True) #type: ignore 
@@ -1100,37 +1174,9 @@ class AlgCircuitTNSimulator(AlgCircuitSimulator):
         result = simulator.run(qc_sim, shots=1).result()
         return DensityMatrix(result.data()["final_dm"])
     
-
-
 class Channels: 
     pass
-def build_all_pauli_matrixsum(n: int) -> Matrixsum:
-    """Matrixsum = sum_k P_k, P_k in {I,X,Y,Z}^{ otimes n}, all coefficients = 1."""
-    instances = []
-    for p_tuple in product('IXYZ', repeat=n):
-        label = ''.join(p_tuple)
-        instances.append((PauliAtom(label, phase=1.0), 1.0))
-    return Matrixsum(instances)
-def gate_metrics_from_blockencoding(ms: Matrixsum):
-    """Collect cx/mccount/tcount from baseline + 2 optimizations."""
-    results = {}
-    modes = [
-        ('baseline', 'No'),
-        ('opt_ctrl_line', 'Ctrl-line'),
-        ('opt_matrix_order', 'Matrix-order'),
-    ]
-    for tag, opt_mode in modes:
-        be = BlockEncoding(ms)
-        qc = be.circuit(opt=opt_mode)
-        results[tag] = {
-            'opt': opt_mode,
-            'width': qc.num_qubits,
-            'cx': int(be.cxcount),
-            'mccount': int(be.mccount),
-            'tcount': int(be.tcount),
-            'qc': qc,
-        }
-    return results
+
 if __name__ == "__main__":
    
     from channel_LCU import Lindblad_to_channel 
@@ -1159,19 +1205,18 @@ if __name__ == "__main__":
 
     channel_Lind = channel_Lind.channels[0][1]
     ms = channel_Lind[0]
-    J = BlockEncoding(ms)
-    J.find_optimal_order_matrices()
-    qc_nopt = J.circuit(opt = 'No')
-    qc_opt_line = J.circuit(opt = 'Ctrl-line')
+    # J = BlockEncoding(ms)
+    # J.find_optimal_order_matrices()
+    # qc_nopt = J.circuit(opt = 'No')
+    # qc_opt_line = J.circuit(opt = 'Matrix-order')
     # print(qc_nopt.draw())
     # print(qc_opt_line.draw())
     # print(J.tcount, J.mccount, J.cxcount)
-
-    ms = build_all_pauli_matrixsum(n = 4)
-    J = BlockEncoding(ms)
-    J.find_optimal_order_matrices()
-    qc_opt_mo = J.circuit(opt = 'Matrix-order')
-    print(J.tcount, J.mccount, J.cxcount)
+    # ms = build_all_pauli_matrixsum(n = 4)
+    # J = BlockEncoding(ms)
+    # # J.find_optimal_order_matrices()
+    # qc_opt_mo = J.circuit(opt = 'Matrix-order')
+    # print(J.tcount, J.mccount, J.cxcount)
 #     TFIM_lind = Lindbladian(H, L_list)
 
 #     channel_Lind, success_prob_th, coeff_sum = Lindblad_to_channel(TFIM_lind, delta_t)

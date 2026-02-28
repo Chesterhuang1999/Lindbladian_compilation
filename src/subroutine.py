@@ -249,69 +249,7 @@ def apply_poly_phases(phi_values, gadget, qc: QuantumCircuit, anc, ctrl):
     qc.h(anc[0])
 
     return qc
-def qsvt_Hamiltonian(J: Matrixsum, t: float):
-    """
-    Create the QSVT circuit for the Hamiltonian terms e^-iJt
-    J is the coherent term: J = H - 1/2i sum L^dag L
-    q is number of quadrature points,
-    and l is truncation order for term J.
-    """
-    ### Create the block-encoding of J
-    qc_basic = block_encoding_matrixsum(J)
-    subnorm_fac = sum(abs(coeff) for _, coeff in J.instances)
-    sys_size = J.size
-    ctrl_size = qc_basic.num_qubits - sys_size
-    anc = QuantumRegister(1, 'a')
-    if ctrl_size > 0:
-        ctrl = QuantumRegister(ctrl_size, 'c')
-    sys = QuantumRegister(sys_size, 's')
 
-    ### Compute phase polynomials 
-    deg = 4
-    cos_func = lambda x: np.cos(subnorm_fac * t * x)
-    cos_phi_values, max_value_cos = get_adaptive_qsp_phases(cos_func, deg)
-    sin_func = lambda x: np.sin(subnorm_fac * t * x)
-    sin_phi_values, max_value_sin = get_adaptive_qsp_phases(sin_func, deg - 1)
-    
-    cos_phi_values[0] += np.pi / 4 #type:ignore
-    for i in range(1, len(cos_phi_values) - 1):
-        cos_phi_values[i] -= np.pi / 2 #type: ignore
-    cos_phi_values[-1] += np.pi / 4 #type: ignore
-
-    sin_phi_values[0] += np.pi / 4 #type: ignore
-    for i in range(1, len(sin_phi_values)):
-        sin_phi_values[i] -= np.pi / 2 #type: ignore
-    sin_phi_values[-1] +=  np.pi / 4 #type: ignore
-
-    QSVT_basic_gadget = qc_basic.to_gate(label = "QSVT_basic_gadget") 
-    
-    if ctrl_size == 0:
-        qc_sin = QuantumCircuit(anc, sys)
-        qc_cos = QuantumCircuit(anc, sys)
-        qc_sin = apply_poly_phases(sin_phi_values, QSVT_basic_gadget, qc_sin, anc, None)
-        qc_cos = apply_poly_phases(cos_phi_values, QSVT_basic_gadget, qc_cos, anc, None)
-    else:
-        qc_sin = QuantumCircuit(anc, ctrl, sys)
-        qc_cos = QuantumCircuit(anc, ctrl, sys)
-        qc_sin = apply_poly_phases(sin_phi_values, QSVT_basic_gadget, qc_sin, anc, ctrl)
-        qc_cos = apply_poly_phases(cos_phi_values, QSVT_basic_gadget, qc_cos, anc, ctrl)
-    U_ctrl_cos = qc_cos.to_gate().control(1, ctrl_state = '0')
-    U_ctrl_sin = qc_sin.to_gate().control(1, ctrl_state = '1')
-  
-    ## Prepare a LCU circuit for e^(iHt) = cos(Ht) - isin(Ht)
-    ## An additional ancilla qubit for Hamiltonian evolution e^(-iHt), initialized in |+>
-    sel = QuantumRegister(1, 'sel')
-    if ctrl_size == 0:
-        qc_main = QuantumCircuit(sel, anc, sys)
-    else:
-        qc_main = QuantumCircuit(sel, anc, ctrl, sys) 
-    qc_main.ry(np.pi / 2, sel) # Prepare coeff (1/sqrt(2), 1/sqrt(2))
-    qc_main.append(U_ctrl_cos, qc_main.qubits)
-    qc_main.append(U_ctrl_sin, qc_main.qubits)
-    qc_main.p(-np.pi / 2 ,sel)
-    qc_main.ry(-np.pi / 2, sel)
-
-    return qc_main, max_value_cos + max_value_sin
 
 def prep_sup_state(coeffs: list) -> QuantumCircuit:
     """
@@ -407,29 +345,3 @@ if __name__ == "__main__":
     TFIM_lind = Lindbladian(H, L_list)
     success_prob_th = probs_from_lindblad(TFIM_lind)
     print("Theoretical success probability:", success_prob_th)
-    r = 3
-    equation = sp.Eq(success_prob_th, 4**(-1/r))
-    initial_guess = 0.05
-    delta_value = sp.nsolve(equation, sp.symbols('delta_t', real = True, positive = True), initial_guess)
-    print("Solved delta_t value:", delta_value)
-    print(delta_value * r)
-    r, h = 1, 1
-    g_state, qc_zerow = create_zerow_comp_state(r, h, 0.49)
-    print(g_state, qc_zerow)
-    exit(0)
-    ccccx = XGate.control(self = XGate(), num_ctrl_qubits= 6, ctrl_state = '101000')
-    qc = QuantumCircuit(3)
-    qc.x(0)
-    # qc.x(4)
-    # qc.x(5)
-    qc.save_statevector() #type: ignore
-    print(qc.draw())
-    simulator = AerSimulator()
-    compiled_circuit = transpile(qc, simulator)
-    result = simulator.run(compiled_circuit).result()
-    print(result.get_counts())
-    statevec = result.get_statevector(compiled_circuit)
-    print(statevec)
-
-    # print(qc.draw())
-    g_state, qc_zerow = create_zerow_comp_state(r, h, p)
