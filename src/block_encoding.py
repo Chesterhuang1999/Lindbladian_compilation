@@ -546,6 +546,9 @@ def mobius_invert_modes_with_phases(w, additional_modes, vec_phase_lookup):
         phase_from_g[b] = accum_phase
 
     phi_ad_table = (p_phase_table - phase_from_g) % 4
+    additional_indices = {int(mode[1], 2) for mode in additional_modes}
+    for idx in additional_indices:
+        g_phase_table[idx] = (int(g_phase_table[idx]) + int(phi_ad_table[idx])) % 4
 
     basis_modes_with_phase, nonbasis_modes_with_phase = extract_basis_modes_with_phases(additional_modes, vec_phase_lookup)
 
@@ -1180,6 +1183,7 @@ class Channels:
 if __name__ == "__main__":
    
     from channel_LCU import Lindblad_to_channel 
+    from qiskit.quantum_info import random_pauli_list
     N = 3
     H = []
     L_list = []
@@ -1193,18 +1197,22 @@ if __name__ == "__main__":
         H.append((X_str, -1))
         Y_str = ''.join([('Y' if j == i else 'I') for j in range(N)])
         L_list.append([(X_str, gamma), (Y_str, -1j * gamma)])
-
     delta_t = 0.1
     gamma = np.sqrt(0.1)/2 
     # H = [('ZZI', -1), ('IZZ', -1), ('ZIZ', -1),('XII', -1), ('IXI', -1), ('IIX', -1)]
     # L_list = [[('XII', gamma), ('YII', -1j * gamma)], [('IXI', gamma), ('IYI', -1j * gamma)], [('IIX', gamma), ('IIY', -1j * gamma)]]
-    
     TFIM_lind = Lindbladian(H, L_list)
-
     channel_Lind, success_prob_th, coeff_sum = Lindblad_to_channel(TFIM_lind, delta_t)
-
     channel_Lind = channel_Lind.channels[0][1]
     ms = channel_Lind[0]
+    random_pauli = random_pauli_list(num_qubits = 3, size = 6, phase = False)
+    H_eff = [(ms.to_label(), -1.0) for ms in random_pauli] #type: ignore
+    Random_Lind = Lindbladian(H_eff, [])
+    H_eff = Random_Lind.H
+    print(H_eff)
+    J = BlockEncoding(H_eff)
+    qc_opt_line = J.circuit(opt = 'Matrix-order')
+    print(J.mobius_phase_result)
     # J = BlockEncoding(ms)
     # J.find_optimal_order_matrices()
     # qc_nopt = J.circuit(opt = 'No')

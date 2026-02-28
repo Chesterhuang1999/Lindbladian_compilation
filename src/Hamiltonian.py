@@ -75,7 +75,7 @@ def qsvt_Hamiltonian(J: Matrixsum, t: float, deg: int = 4, opt = 'No'):
         qc_cos = apply_poly_phases(cos_phi_values, QSVT_basic_gadget, qc_cos, anc, ctrl)
 
 
-    return qc_basic, qc_cos, max_value_cos + max_value_sin
+    # return qc_basic, qc_cos, max_value_cos + max_value_sin
     U_ctrl_cos = qc_cos.to_gate().control(1, ctrl_state = '0')
     U_ctrl_sin = qc_sin.to_gate().control(1, ctrl_state = '1')
     
@@ -222,59 +222,59 @@ def qdrift_reps_lower_bound(
         "r_lower_bound_int": r_int,
     }
 
-if __name__ == "__main__":
-    from simulator_utils import simulate_circuit_statevec, normalize
+# if __name__ == "__main__":
+    # from simulator_utils import simulate_circuit_statevec, normalize
 
-    delta_t = 0.1
-    err_th = 1e-4
-    pauli_2bit = [''.join(p) for p in product('IXYZ', repeat=2)]
+    # delta_t = 0.1
+    # err_th = 1e-4
+    # pauli_2bit = [''.join(p) for p in product('IXYZ', repeat=2)]
 
-    total_cases = 0
-    erroneous_cases = 0
+    # total_cases = 0
+    # erroneous_cases = 0
 
-    for P1 in pauli_2bit:
-        for P2 in pauli_2bit:
-            H = [(P1, -1), (P2, -1)]
-            L_list = []
-            lind = Lindbladian(H, L_list)
-            H_eff = lind.H
+    # for P1 in pauli_2bit:
+    #     for P2 in pauli_2bit:
+    #         H = [(P1, -1), (P2, -1)]
+    #         L_list = []
+    #         lind = Lindbladian(H, L_list)
+    #         H_eff = lind.H
 
-            try:
-                _, qc, _ = qsvt_Hamiltonian(H_eff, delta_t, deg=4, opt='Matrix-order')
-                H_evo = Operator(expm(-1j * H_eff.eff_op() * delta_t)) #type: ignore
-                # H_cos = Operator(cosm(H_eff.eff_op() * delta_t)) #type: ignore
-            except Exception as exc:
-                total_cases += 1
-                erroneous_cases += 1
-                print(f"Erroneous case: P1={P1}, P2={P2}, build_error={type(exc).__name__}: {exc}")
-                continue
+    #         try:
+    #             _, qc, _ = qsvt_Hamiltonian(H_eff, delta_t, deg=4, opt='Matrix-order')
+    #             H_evo = Operator(expm(-1j * H_eff.eff_op() * delta_t)) #type: ignore
+    #             # H_cos = Operator(cosm(H_eff.eff_op() * delta_t)) #type: ignore
+    #         except Exception as exc:
+    #             total_cases += 1
+    #             erroneous_cases += 1
+    #             print(f"Erroneous case: P1={P1}, P2={P2}, build_error={type(exc).__name__}: {exc}")
+    #             continue
 
-            case_bad = False
-            for i in range(4):
-                start = time.time()
-                bin_str = bin(i)[2:].zfill(2)
-                ini_state_qsvt = Statevector.from_label(bin_str + '0' * (qc.num_qubits - 2))
-                ini_state_baseline = Statevector.from_label(bin_str)
-                final_state_baseline = normalize(ini_state_baseline.evolve(H_evo))
-                final_state_sys = simulate_circuit_statevec(
-                    qc,
-                    ini_state_qsvt,
-                    None,
-                    reg_sizes=[0, qc.num_qubits - 2, 2],
-                )
-                _ = time.time() - start
+    #         case_bad = False
+    #         for i in range(4):
+    #             start = time.time()
+    #             bin_str = bin(i)[2:].zfill(2)
+    #             ini_state_qsvt = Statevector.from_label(bin_str + '0' * (qc.num_qubits - 2))
+    #             ini_state_baseline = Statevector.from_label(bin_str)
+    #             final_state_baseline = normalize(ini_state_baseline.evolve(H_evo))
+    #             final_state_sys = simulate_circuit_statevec(
+    #                 qc,
+    #                 ini_state_qsvt,
+    #                 None,
+    #                 reg_sizes=[0, qc.num_qubits - 2, 2],
+    #             )
+    #             _ = time.time() - start
 
-                diff = DensityMatrix(final_state_sys) - DensityMatrix(final_state_baseline)
-                err = np.linalg.norm(diff, ord='nuc') / 2
-                if err > err_th:
-                    case_bad = True
-                    print(f"Erroneous case: P1={P1}, P2={P2}, err={err:.6e}")
-                    break
+    #             diff = DensityMatrix(final_state_sys) - DensityMatrix(final_state_baseline)
+    #             err = np.linalg.norm(diff, ord='nuc') / 2
+    #             if err > err_th:
+    #                 case_bad = True
+    #                 print(f"Erroneous case: P1={P1}, P2={P2}, err={err:.6e}")
+    #                 break
 
-            total_cases += 1
-            if case_bad:
-                erroneous_cases += 1
+    #         total_cases += 1
+    #         if case_bad:
+    #             erroneous_cases += 1
 
-    print(f"Checked {total_cases} cases over all 2-bit Pauli pairs.")
-    print(f"Erroneous cases (err > {err_th}): {erroneous_cases}")
+    # print(f"Checked {total_cases} cases over all 2-bit Pauli pairs.")
+    # print(f"Erroneous cases (err > {err_th}): {erroneous_cases}")
 
