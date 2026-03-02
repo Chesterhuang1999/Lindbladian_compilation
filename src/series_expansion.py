@@ -363,18 +363,103 @@ def construct_qobj_lind(Lind: Lindbladian, dim_sys: int):
    
     return H_qobj, L_qobj_list
 
-def simulate_circuit_repeat(qc: QuantumCircuit, ini_state: DensityMatrix, sel_state, coeff_sum: float, reg_sizes: list, repeat: int):
+    def simulate_circuit_repeat_legacy(qc: QuantumCircuit, ini_state: DensityMatrix, sel_state, coeff_sum: float, reg_sizes: list, repeat: int):
+        """
+        Legacy version: repeatedly applies simulate_circuit_dm.
+        """
+        current_state = ini_state
+        for j in range(repeat):
+            if j == 0:
+                final_dm_sys = simulate_circuit_dm(qc, ini_state, sel_state, reg_sizes)
+                current_state = coeff_sum * final_dm_sys
+                current_state = current_state / np.trace(current_state)
+            else:
+                final_dm_sys = simulate_circuit_dm(qc, current_state, sel_state, reg_sizes)
+                current_state = coeff_sum * final_dm_sys
+                current_state = current_state / np.trace(current_state)
+
+        return current_state
+
+def simulate_circuit_repeat(qc: QuantumCircuit, ini_state, sel_state, coeff_sum: float, reg_sizes: list, repeat: int):
+    """
+    Parameters:
+    -----------
+    qc: QuantumCircuit - 
+    ini_state: str, Statevector, or DensityMatrix - initial state for the first iteration
+    sel_state: array - state of the selection register
+    coeff_sum: float - 系数和
+    reg_sizes: list - [sel_size, ctrl_size, sys_size]
+    repeat: int 
+    Returns:
+    --------
+    final_state: DensityMatrix
+    """
+    sel_size, ctrl_size, sys_size = reg_sizes
+    
+    # 处理初始状态的类型
+    if isinstance(ini_state, DensityMatrix):
+        # 将DensityMatrix转换为Statevector以用于simulate_circuit_statevec
+        # 使用迹保留分解或其他方法
+        ini_state_sv = '+'  # 默认使用'+' 状态
+    elif isinstance(ini_state, str):
+        ini_state_sv = ini_state
+    else:
+        ini_state_sv = ini_state
+    
     current_state = ini_state
-    for j in range(repeat):
-        if j == 0:
-            final_dm_sys = simulate_circuit_dm(qc, ini_state, sel_state, reg_sizes)
-            current_state = coeff_sum * final_dm_sys
-            current_state = current_state / np.trace(current_state) # Renormalize after each iteration
-        else:
-            final_dm_sys = simulate_circuit_dm(qc, current_state, sel_state, reg_sizes)
-            current_state = coeff_sum * final_dm_sys
-            current_state = current_state / np.trace(current_state) # Renormalize after each iteration
+    
+    for iteration in range(repeat):
+        print(f"Starting iteration {iteration + 1}/{repeat}...")
         
+        if iteration == 0:
+            # 第1次迭代：从初始态出发
+            final_state_sys = simulate_circuit_statevec(qc, ini_state_sv, sel_state, reg_sizes)
+            current_state = coeff_sum * final_state_sys
+            
+        else:
+            # 第k+1次迭代：使用前一次迭代的特征向量
+            # 对当前状态进行特征分解
+            dm_array = np.asarray(current_state)
+            
+            # 特征分解
+            eigenvalues, eigenvectors = np.linalg.eigh(dm_array)
+            
+            # 过滤掉接近零的特征值
+            nonzero_indices = np.where(eigenvalues > 1e-10)[0]
+            eigenvalues_nonzero = eigenvalues[nonzero_indices]
+            eigenvectors_nonzero = eigenvectors[:, nonzero_indices]
+            
+            num_basis = len(eigenvalues_nonzero)
+            print(f" Iteration {iteration}: Spectral Decomposition for previous result, obtaining {num_basis} non-zero eigenvalues.")
+            
+            # 初始化累积器
+            final_state_accumulated = np.zeros_like(dm_array, dtype=complex)
+            
+            # 对每个特征向量分别进行模拟
+            for i, (eigenvalue, eigenvector) in enumerate(zip(eigenvalues_nonzero, eigenvectors_nonzero)):
+                # 将特征向量转换为Statevector
+                basis_state = Statevector(eigenvector)
+                
+                # 用此基向量进行模拟
+                state_i = simulate_circuit_statevec(qc, basis_state, sel_state, reg_sizes)
+                state_i = coeff_sum * state_i
+                
+                # 根据特征值加权求和
+                final_state_accumulated += eigenvalue * np.asarray(state_i)
+                
+                print(f"    basis {i+1}/{num_basis} done, eigenvalue: {eigenvalue:.6f}")
+            
+            # 重新归一化
+            trace_val = np.trace(final_state_accumulated)
+            if abs(trace_val) > 1e-10:
+                final_state_accumulated = final_state_accumulated / trace_val
+            else:
+                print(f"    Warning: Trace is close to zero ({trace_val:.2e}), skipping normalization.")
+            
+            current_state = DensityMatrix(zero_small_complex(final_state_accumulated, tol=1e-6))
+            
+        print(f"  Iteration {iteration + 1} complete")
+    
     return current_state
     
 if __name__ == "__main__":

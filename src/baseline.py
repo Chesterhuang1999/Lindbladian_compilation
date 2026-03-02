@@ -29,13 +29,18 @@ def simulate_lindblad(H: Qobj, L_list: list, psi_0: Qobj, duration: float = 1.0,
     Simulate the Lindblad evolution using QuTiP mesolve
     """
 
+    tlist = [0.0, float(duration)]
+    options = {
+        "store_states": False,
+        "store_final_state": True,
+        "nsteps": max(1000, int(200 * max(1, r)))
+    }
 
-    # psi_0 = tensor(basis(2,0) for _ in range(N))  # type: ignore
-
-    tlist = np.linspace(0, duration, r)
-
-    result = mesolve(H, psi_0, tlist, c_ops = L_list, e_ops = [])
-    final_state_qobj = result.states[-1].data_as("ndarray")
+    result = mesolve(H, psi_0, tlist, c_ops=L_list, e_ops=[], options=options)
+    if hasattr(result, "final_state") and result.final_state is not None:
+        final_state_qobj = result.final_state.data_as("ndarray")
+    else:
+        final_state_qobj = result.states[-1].data_as("ndarray")
     
     return approx_state(final_state_qobj, tol = 1e-8, rnd = 6)
 

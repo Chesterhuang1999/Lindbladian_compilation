@@ -395,21 +395,41 @@ def get_postmeas_density(final_sv: Statevector, qubit_regs: list):
     elif len(qubit_regs) == 5:
         greg, anc, ctrl, select, sys = qubit_regs
     ctrl_size, select_size, sys_size = len(ctrl), len(select), len(sys)
-    ctrl_size = len(ctrl)    
-    
-    ### Create a projection operator |0><0| on control qubits
-    proj_0 = Operator.from_label('0' * ctrl_size)
-    # iden = Operator.from_label('I' * (select_size + sys_size))
-    iden1 = Operator.from_label('I' * select_size) 
-    iden2 = Operator.from_label('I' * sys_size)
-    if len(qubit_regs) == 5:
-        iden_2 = Operator.from_label('I' * (len(greg) + 1)) 
-    proj_full = (iden1.tensor(proj_0)).tensor(iden2) if len(qubit_regs) == 5 else iden2.tensor(proj_0).tensor(iden1)
-    
-    post_vec = np.dot(proj_full, final_sv.data)
-    system_density = partial_trace(DensityMatrix(post_vec),  list(range(ctrl_size + select_size)))
+    ctrl_size = len(ctrl)
 
-    system_density = system_density / system_density.trace()
+    if len(qubit_regs) == 3:
+        # final_sv is prepared as: sys_state.tensor(ctrl_state.tensor(sel_state))
+        # Flattened index: idx = ((sys_idx << ctrl_size) + ctrl_idx) << select_size + sel_idx
+        data = np.asarray(final_sv.data, dtype=complex)
+        dim_sys = 1 << sys_size
+        dim_sel = 1 << select_size
+        stride_sys = 1 << (ctrl_size + select_size)
+
+        # amplitudes of |sys>\otimes|sel> conditioned on ctrl=0...0
+        post_amp_sys_sel = np.zeros((dim_sys, dim_sel), dtype=complex)
+        
+        for sys_idx in range(dim_sys):
+            base = sys_idx * stride_sys
+            for sel_idx in range(dim_sel):
+                post_amp_sys_sel[sys_idx, sel_idx] = data[base + sel_idx]
+
+        # Explicitly partial-trace over select register:
+        # rho_sys[a,b] = sum_s amp[a,s] * conj(amp[b,s])
+        system_density_np = np.einsum('as,bs->ab', post_amp_sys_sel, post_amp_sys_sel.conj())
+        trace_val = np.trace(system_density_np)
+        if abs(trace_val) > 1e-14:
+            system_density_np = system_density_np / trace_val
+        system_density = DensityMatrix(system_density_np)
+    else:
+        ### Fallback for encoded-AA register layout
+        proj_0 = Operator.from_label('0' * ctrl_size)
+        iden1 = Operator.from_label('I' * select_size)
+        iden2 = Operator.from_label('I' * sys_size)
+        proj_full = (iden1.tensor(proj_0)).tensor(iden2)
+
+        post_vec = np.dot(proj_full, final_sv.data)
+        system_density = partial_trace(DensityMatrix(post_vec), list(range(ctrl_size + select_size)))
+        system_density = system_density / system_density.trace()
     ## Trace out the control and select qubits
     # if len(qubit_regs) == 3:
     #     system_density = partial_trace(post_density, list(range(ctrl_size + select_size)))
