@@ -51,15 +51,15 @@ def qsvt_Hamiltonian(J: Matrixsum, t: float, deg: int = 4, opt = 'No'):
     #     sin_phi_values[i] -= np.pi / 2 #type: ignore
     # sin_phi_values[-1] +=  np.pi / 4 #type: ignore
 
-    cos_phi_values[0] += np.pi / 4 #type:ignore
+    cos_phi_values[0] -= np.pi / 4 #type:ignore
     for i in range(1, len(cos_phi_values) - 1):
-        cos_phi_values[i] -= np.pi / 2 #type: ignore
-    cos_phi_values[-1] += np.pi / 4 #type: ignore
+        cos_phi_values[i] += np.pi / 2 #type: ignore
+    cos_phi_values[-1] += 3 * np.pi / 4 #type: ignore
 
-    sin_phi_values[0] += np.pi / 4 #type: ignore
+    sin_phi_values[0] -= np.pi / 4 #type: ignore
     for i in range(1, len(sin_phi_values)):
-        sin_phi_values[i] -= np.pi / 2 #type: ignore
-    sin_phi_values[-1] +=  np.pi / 4 #type: ignore
+        sin_phi_values[i] += np.pi / 2 #type: ignore
+    sin_phi_values[-1] += 3 * np.pi / 4 #type: ignore
 
     QSVT_basic_gadget = qc_basic.to_gate(label = "QSVT_basic_gadget") 
     

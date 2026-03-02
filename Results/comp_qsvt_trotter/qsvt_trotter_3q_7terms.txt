@@ -1,0 +1,4 @@
+Number of successful cases with error < 1e-3: 39 out of 50
+Average QDrift gate counts set:  cx: 11592.871794871795 u3: 11380.358974358975
+qsvt gate counts set with pauli-level optimization:  cx: 5468.0 u3: 6809.871794871795
+qsvt gate counts with no optimization:  cx: 15593.333333333334 u3: 19234.71794871795

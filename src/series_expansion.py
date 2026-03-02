@@ -85,7 +85,7 @@ def create_single_kraus(
         if j < k:
             L_j = L_list[l_list[k - j - 1]]
             coeff_sum_index *= L_j.pauli_norm() ## sum of coefficients 
-            qc_L = BlockEncoding(L_j).circuit()
+            qc_L = BlockEncoding(L_j).circuit(opt= 'No')
             qc_elem.compose(qc_L, qubits = qc_elem.qubits[ctrl_offset: ctrl_offset + ctrl_reg_size[2 * j + 1]] 
                         + qc_elem.qubits[total_ctrl_size:], inplace = True)
             ctrl_offset += ctrl_reg_size[2 * j + 1]
@@ -109,7 +109,7 @@ def construct_circuit_coherent(J: Matrixsum, K1: int, t: float):
             sum_of_J = sum_of_J.add(product_J)
 
     # qc_J = block_encoding_matrixsum(sum_of_J)
-    qc_J = BlockEncoding(sum_of_J).circuit()
+    qc_J = BlockEncoding(sum_of_J).circuit(opt = 'No')
     succ_prob = sum_of_J.pauli_norm()
     return qc_J, succ_prob
 
@@ -256,12 +256,12 @@ def projection_vec(sv: Statevector, dim: int, anc_size: int, ctrls: list):
 
 
 def simulate_circuit_statevec(qc: QuantumCircuit, ini_state, sel_state, reg_sizes: list):
+
     simulator = AerSimulator(method = 'statevector')
     
     sel_size, ctrl_size, sys_size = reg_sizes
     qc_sim = QuantumCircuit(qc.num_qubits)
     state_sys_ctrl = Statevector.from_label(ini_state + '0' * ctrl_size)
-    
     state_tot = state_sys_ctrl.tensor(Statevector(sel_state))
     
     qc_sim.initialize(state_tot)
@@ -288,6 +288,7 @@ def simulate_circuit_dm(qc: QuantumCircuit, ini_state, sel_state, reg_sizes: lis
     dens_sys_ctrl = ini_state.tensor(DensityMatrix.from_label('0' * ctrl_size))
     dens_tot = dens_sys_ctrl.tensor(DensityMatrix(Statevector(sel_state)))
     # qc = transpile(qc, simulator, optimization_level=1)
+    
     qc_sim.append(SetDensityMatrix(dens_tot), qc_sim.qubits)
     qc_sim.compose(qc, qc_sim.qubits, inplace=True)
     # qc_sim.append(qc.to_gate(), qargs = qc_sim.qubits)
@@ -367,93 +368,55 @@ def simulate_circuit_repeat(qc: QuantumCircuit, ini_state: DensityMatrix, sel_st
             final_dm_sys = simulate_circuit_dm(qc, current_state, sel_state, reg_sizes)
             current_state = coeff_sum * final_dm_sys
             current_state = current_state / np.trace(current_state) # Renormalize after each iteration
-        print(current_state)
+        
     return current_state
     
 if __name__ == "__main__":
     
-    test_case = 3
-    
-  
-    if test_case == 2:
-        H = [('ZZI', -1), ('IZZ', -1), ('ZIZ', -1),('XII', -1), ('IXI', -1), ('IIX', -1)]
-        gamma = np.sqrt(0.1)/2 
-        L_list = [[('XII', gamma), ('YII', -1j * gamma)], [('IXI', gamma), ('IYI', -1j * gamma)], [('IIX', gamma), ('IIY', -1j * gamma)]]
-        TFIM_lind = Lindbladian(H, L_list)
-        H = [('Z', 1j)]
-        L = []
-        delta_t = 0.1
-        TFIM_lind = Lindbladian(H, L)
-        H_eff = TFIM_lind.effective_H()
-        print(H_eff)
-        qc, max_value = qsvt_Hamiltonian(H_eff, delta_t)
-        qc_n = QuantumCircuit(qc.num_qubits)
+    ## Parameters for higher order series expansion test:
+    ## Empty Hamiltonian
+    H = []
+    ## Expansion order
+    K = 2
+    ## sampling points for quadrature
+    q = 4
+    ### evolution time
+    t = 0.1
+    ### decaying strength
+    v = 0.5
+    ### truncation order for J's Taylor series in each Kraus operator
+    K1 = 5
+    ### Sequence length
+    repeat = 1
+    ## Scaling factor for the lindbladian |L|_be < 1
+    scaling = 4.01
 
-        start = time.time()
-        H_evo = Operator(expm(-1j * H_eff.eff_op() * delta_t)) #type: ignore
-        ini_state_qsvt = Statevector.from_label('+' + '0' * (qc.num_qubits - 1)) 
-        ini_state_baseline = Statevector.from_label('+')
-        final_state_baseline = normalize(ini_state_baseline.evolve(H_evo))
-        print("Baseline final state:")
-        print(final_state_baseline)
-        qc_n.initialize(ini_state_qsvt)
-        qc_n.compose(qc, qc_n.qubits, inplace = True)
-    
-        final_state_sys = simulate_circuit_statevec(qc_n, reg_sizes = [0, qc.num_qubits - 1, 1])
-        print("QSVT final state:")
-        print(final_state_sys)
-        end = time.time()
-        print(f"QSVT simulation time: {end - start} seconds")
-        
-        diff = DensityMatrix(final_state_sys) - DensityMatrix(final_state_baseline)
-        err = np.linalg.norm(diff, ord = 'nuc') / 2
-        print(f"Simulate error: {err}")
-    
-    elif test_case == 3:
-        ## Parameters for higher order series expansion test:
-        ## Empty Hamiltonian
-        H = []
-        ## Expansion order
-        K = 1
-        ## sampling points for quadrature
-        q = 4
-        ### evolution time
-        t = 0.1
-        ### decaying strength
-        v = 0.5
-        ### truncation order for J's Taylor series in each Kraus operator
-        K1 = 5
-        ### Sequence length
-        repeat = 1
-        ## Scaling factor for the lindbladian |L|_be < 1
-        scaling = 4.01
+    L_list = [[('X', np.sqrt(v + 1)/scaling), ('Y', 1j * np.sqrt(v + 1)/scaling)], [('X', np.sqrt(v)/scaling), ('Y', -1j * np.sqrt(v)/scaling)]]
+    decay_lind = Lindbladian(H, L_list)
 
-        L_list = [[('X', np.sqrt(v + 1)/scaling), ('Y', 1j * np.sqrt(v + 1)/scaling)], [('X', np.sqrt(v)/scaling), ('Y', -1j * np.sqrt(v)/scaling)]]
-        decay_lind = Lindbladian(H, L_list)
-
-        ini_state = Statevector.from_label('+')
-        ## Create a baseline 
-        H_qobj, L_qobj_list = construct_qobj_lind(decay_lind, decay_lind.__size__())
-        qplus = (basis(2,0) + basis(2,1)).unit()
-        ini_state_qobj = qplus
-        final_dens = simulate_lindblad(H_qobj, L_qobj_list, ini_state_qobj, repeat * t, r = 10)
-        print("Baseline final density:", final_dens)
-        ### Create the evolution circuit
-        qc, reg_sizes, coeff_sum_sq, sel_state = higher_order_Lind_expansion(decay_lind, K, q, t, K1)
-        
-        ## Test I : Statevector simulation (evolve once )
-        final_state_sys = simulate_circuit_statevec(qc, ini_state = '+', sel_state = sel_state, reg_sizes = reg_sizes)
-        final_state_sys = coeff_sum_sq * final_state_sys
-        ## Test II: Density matrix simulation (evolve once)
-        # final_dm_sys = simulate_circuit_dm(qc, ini_state = DensityMatrix.from_label('+'), sel_state = sel_state, reg_sizes = reg_sizes)
-        # final_dm_sys = coeff_sum_sq * final_dm_sys 
-        ### Test III: Repeatedly applying circuit qc to simulate longer time 
-        final_dm_sys = simulate_circuit_repeat(qc, DensityMatrix.from_label('+'), sel_state, coeff_sum_sq, reg_sizes, repeat = repeat)
-        
-        # print("Simulated final density:", DensityMatrix(final_dens_sys))
+    ini_state = Statevector.from_label('+')
+    ## Create a baseline 
+    H_qobj, L_qobj_list = construct_qobj_lind(decay_lind, decay_lind.__size__())
+    qplus = (basis(2,0) + basis(2,1)).unit()
+    ini_state_qobj = qplus
+    final_dens = simulate_lindblad(H_qobj, L_qobj_list, ini_state_qobj, repeat * t, r = 10)
+    print("Baseline final density:", final_dens)
+    ### Create the evolution circuit
+    qc, reg_sizes, coeff_sum_sq, sel_state = higher_order_Lind_expansion(decay_lind, K, q, t, K1)
     
-        
-        diff = final_dm_sys - final_dens
-        err = np.linalg.norm(diff, ord = 'nuc') / 2
-        print(f"Simulate error: {err}")
+    ## Test I : Statevector simulation (evolve once )
+    # final_state_sys = simulate_circuit_statevec(qc, ini_state = '+', sel_state = sel_state, reg_sizes = reg_sizes)
+    # final_state_sys = coeff_sum_sq * final_state_sys
+    ## Test II: Density matrix simulation (evolve once)
+    # final_dm_sys = simulate_circuit_dm(qc, ini_state = DensityMatrix.from_label('+'), sel_state = sel_state, reg_sizes = reg_sizes)
+    # final_dm_sys = coeff_sum_sq * final_dm_sys 
+    ### Test III: Repeatedly applying circuit qc to simulate longer time 
+    final_dm_sys = simulate_circuit_repeat(qc, DensityMatrix.from_label('+'), sel_state, coeff_sum_sq, reg_sizes, repeat = repeat)
+    
+    # print("Simulated final density:", DensityMatrix(final_dens_sys))
+
+    
+    diff = final_dm_sys - final_dens
+    err = np.linalg.norm(diff, ord = 'nuc') / 2
+    print(f"Simulate error: {err}")
         

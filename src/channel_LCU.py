@@ -437,7 +437,6 @@ def simulate_circuit(circuit: QuantumCircuit, ini_state: Statevector, qubit_regs
     simulator = AerSimulator()
     qc_test = deepcopy(circuit)
     qubit_size = [len(qreg) for qreg in qubit_regs]
-    print(qubit_size)
     ## Distinguish the type of registers using length of qubit_regs
     if len(qubit_regs) == 3:
         ctrl, select, sys = qubit_regs
@@ -451,7 +450,7 @@ def simulate_circuit(circuit: QuantumCircuit, ini_state: Statevector, qubit_regs
     final_sv = result_job['final_state']
     final_sv = approx_state(Statevector(final_sv), tol=1e-6)
     system_density_final = get_postmeas_density(final_sv, qubit_regs).data
-    print(system_density_final)
+    # print(system_density_final)
     ## Certify that the circuit is well-behaved; We only need to measure the control register
     creg = ClassicalRegister(len(ctrl), 'clval')
     qc_test.add_register(creg)
