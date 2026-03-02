@@ -396,11 +396,9 @@ def get_postmeas_density(final_sv: Statevector, qubit_regs: list):
         greg, anc, ctrl, select, sys = qubit_regs
     ctrl_size, select_size, sys_size = len(ctrl), len(select), len(sys)
     ctrl_size = len(ctrl)    
-    density = DensityMatrix(final_sv)
     
     ### Create a projection operator |0><0| on control qubits
-    vec_0 = Statevector.from_label('0' * ctrl_size)
-    proj_0 = vec_0.to_operator()
+    proj_0 = Operator.from_label('0' * ctrl_size)
     # iden = Operator.from_label('I' * (select_size + sys_size))
     iden1 = Operator.from_label('I' * select_size) 
     iden2 = Operator.from_label('I' * sys_size)
@@ -408,16 +406,16 @@ def get_postmeas_density(final_sv: Statevector, qubit_regs: list):
         iden_2 = Operator.from_label('I' * (len(greg) + 1)) 
     proj_full = (iden1.tensor(proj_0)).tensor(iden2) if len(qubit_regs) == 5 else iden2.tensor(proj_0).tensor(iden1)
     
-    post_density = np.array(proj_full@density@proj_full)
-    post_density = DensityMatrix(post_density)
+    post_vec = np.dot(proj_full, final_sv.data)
+    system_density = partial_trace(DensityMatrix(post_vec),  list(range(ctrl_size + select_size)))
 
+    system_density = system_density / system_density.trace()
     ## Trace out the control and select qubits
-    if len(qubit_regs) == 3:
-        system_density = partial_trace(post_density, list(range(ctrl_size + select_size)))
-    elif len(qubit_regs) == 5:
-        system_density = partial_trace(post_density, list(range(len(greg) + 1 + ctrl_size + select_size)))
-    trace = system_density.trace().real
-    system_density = system_density / trace
+    # if len(qubit_regs) == 3:
+    #     system_density = partial_trace(post_density, list(range(ctrl_size + select_size)))
+    # elif len(qubit_regs) == 5:
+    #     system_density = partial_trace(post_density, list(range(len(greg) + 1 + ctrl_size + select_size)))
+    
     return system_density
 def construct_qobj_lind(Lind: Lindbladian, dim_sys: int):
     """
@@ -432,50 +430,32 @@ def construct_qobj_lind(Lind: Lindbladian, dim_sys: int):
     return H_qobj, L_qobj_list
 
 
-def simulate_circuit(circuit: QuantumCircuit, ini_state: Statevector, qubit_regs: list, duration: float = 0.1, r: int = 10):
-    N = 100000
+def simulate_circuit(circuit: QuantumCircuit, ini_state: Statevector, qubit_regs: list):
     simulator = AerSimulator()
     qc_test = deepcopy(circuit)
-    qubit_size = [len(qreg) for qreg in qubit_regs]
-    ## Distinguish the type of registers using length of qubit_regs
-    if len(qubit_regs) == 3:
-        ctrl, select, sys = qubit_regs
-    elif len(qubit_regs) == 5:
-        greg, anc, ctrl, select, sys = qubit_regs
-    qc_test = transpile(qc_test, simulator, optimization_level=1)
     
+    ## Distinguish the type of registers using length of qubit_regs
+    qc_test = transpile(qc_test, simulator, optimization_level=1)
     ## Extract system density for comparison
     result_job = simulator.run(qc_test, shots = 1, initial_state=ini_state).result().data(0)
-
+    print('Simulation done, extracting final state...   ')
     final_sv = result_job['final_state']
     final_sv = approx_state(Statevector(final_sv), tol=1e-6)
     system_density_final = get_postmeas_density(final_sv, qubit_regs).data
-    # print(system_density_final)
+    
     ## Certify that the circuit is well-behaved; We only need to measure the control register
-    creg = ClassicalRegister(len(ctrl), 'clval')
-    qc_test.add_register(creg)
-    for i in range(len(ctrl)):
-        qc_test.measure(i + qubit_size[1], creg[i])
-    result = simulator.run(qc_test, shots = N, initial_state=ini_state).result()
-    success_prob = result.get_counts()['0'*len(ctrl)] / N
+    # creg = ClassicalRegister(len(ctrl), 'clval')
+    # qc_test.add_register(creg)
+    # for i in range(len(ctrl)):
+    #     qc_test.measure(i + qubit_size[1], creg[i])
+    # result = simulator.run(qc_test, shots = N, initial_state=ini_state).result()
+    # success_prob = result.get_counts()['0'*len(ctrl)] / N
 
-    return success_prob, DensityMatrix(system_density_final)
+    return DensityMatrix(system_density_final)
 
 if __name__ == "__main__":
    
     test_case = 2
-    ## Test I: A simple paulisum channels
-    if test_case == 1:
-        A = [[('YI', 0.95), ('IY', 0.25j)], [('XI', 0.5j), ('IX', 0.4j)]]
-        
-        A_matsum = [list2matsum(A[0]), list2matsum(A[1])]
-        LCU, qubit_regs = channel_to_LCU(channel_ensemble([A_matsum]))
-        ini_state = Statevector.from_label('0' * sum([len(qreg) for qreg in qubit_regs]))
-        norm = channel_norm_zero(A_matsum, Statevector.from_label('0' * len(qubit_regs[2])))
-        success_prob, final_sv = simulate_circuit(LCU, ini_state, qubit_regs= qubit_regs)
-        success_prob = success_prob / norm
-        print(success_prob)
-    
 
     ### Test II: A simple Lindbladian 
     ### A transverse field Ising model Lindbladian
@@ -487,7 +467,7 @@ if __name__ == "__main__":
         TFIM_lind = Lindbladian(H, L_list)
         
         channel_Lind, success_prob_th, coeff_sum = Lindblad_to_channel(TFIM_lind, delta_t)
-
+        # print(success_prob_th)
         channel_Lind = channel_Lind.channels[0][1]
         ms = channel_Lind[0]
         H_qobj, L_qobj_list = construct_qobj_lind(TFIM_lind, dim_sys = 3)  
@@ -496,17 +476,18 @@ if __name__ == "__main__":
         qubit_size = [len(qreg) for qreg in qubit_regs]
         norm = channel_norm_zero(channel_Lind, Statevector.from_label('0' * qubit_size[2]))
         ini_state = Statevector.from_label('0' * sum(qubit_size))
-        success_prob, system_density_final = simulate_circuit(LCU, ini_state = ini_state, qubit_regs = qubit_regs) 
-        success_prob = success_prob / norm
+        system_density_final = simulate_circuit(LCU, ini_state = ini_state, qubit_regs = qubit_regs) 
+    
         ini_state_qutip = tensor(basis(2,0), basis(2,0), basis(2,0))
         baseline_density = simulate_lindblad(H_qobj, L_qobj_list, ini_state_qutip, delta_t, 8)
+
         diff = system_density_final - DensityMatrix(baseline_density)
 
         print("Norm difference:", np.linalg.norm(diff, ord = 'nuc')/2)
 
         pnorm = Lindblad_paulinorm(TFIM_lind)
         print(f"Lindbladian Pauli norm: {pnorm}")
-        print(success_prob)
+        # print(success_prob)
     
 
     ### Test III: Encoded LCU circuit for AA
@@ -532,8 +513,8 @@ if __name__ == "__main__":
         qubit_size = [len(qreg) for qreg in qubit_regs]
         norm = channel_norm_zero(channel_Lind, Statevector.from_label('0' * qubit_size[2]))
         ini_state = Statevector.from_label('0' * sum([len(qreg) for qreg in qubit_regs]))
-        success_prob, final_sv = simulate_circuit(LCU, ini_state = ini_state, qubit_regs = qubit_regs, duration = float(delta_t))
-        success_prob = success_prob / norm
+        final_sv = simulate_circuit(LCU, ini_state = ini_state, qubit_regs = qubit_regs)
+        
         # print("Norm of the channel:", norm)
         # print("Single Success probability:", success_prob)
         # print("Theoretical success prob for r iterations:", np.pow(success_prob, r))
@@ -545,24 +526,8 @@ if __name__ == "__main__":
         qubit_size = [len(qreg) for qreg in qubit_regs]
         norm = channel_norm_zero(channel_Lind, Statevector.from_label('0' * qubit_size[-1]))
         ini_state = Statevector.from_label('0' * sum(qubit_size))
-        success_prob, final_sv = simulate_circuit(LCU_encoded, ini_state = ini_state, qubit_regs = qubit_regs, duration = float(delta_t) * r, r = r)
-        success_prob = success_prob / norm
-        # print(LCU_encoded.draw())
-        # print(norm)
-        print("Success probability for encoded circuits:", success_prob)
+        final_sv = simulate_circuit(LCU_encoded, ini_state = ini_state, qubit_regs = qubit_regs )
 
-
-    if test_case == 0:
-        qreg = QuantumRegister(2, 'q')
-        creg = ClassicalRegister(1, 'c')
-        qc = QuantumCircuit(qreg, creg)
-        qc.h(qreg[0])
-        qc.cx(qreg[0], qreg[1])
-        qc.measure(qreg[0], creg[0])
-        simulator = AerSimulator()
-        result = simulator.run(qc, shots = 100000).result()
-        counts = result.get_counts()['0']
-        
 
     
    

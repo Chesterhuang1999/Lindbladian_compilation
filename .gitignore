@@ -5,3 +5,5 @@
 /Outdated/
 .vscode
 /benchmark/*
+
+/Results/*

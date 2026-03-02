@@ -153,7 +153,7 @@ def higher_order_Lind_expansion(Lind: Lindbladian, K: int, q: int, t: float, K1:
             qc_ensemble.append(qc_elem)
             coeff_sum_total.append(coeff_sum_index)
             ctrl_sizes.append(elem_ctrl_size)
-    print(f"Total Kraus operators: {kraus_count}")
+    # print(f"Total Kraus operators: {kraus_count}")
 
     #Define the registers
     sel_size = int(np.ceil(np.log2(kraus_count))) 
@@ -178,7 +178,7 @@ def higher_order_Lind_expansion(Lind: Lindbladian, K: int, q: int, t: float, K1:
     qc_coh_control = qc_info[0].to_gate().control(num_ctrl_qubits = sel_size, ctrl_state = '0' * sel_size)
     qc_main.append(qc_coh_control, qargs = qc_main.qubits[:sel_size] + qc_main.qubits[sel_size:sel_size + qc_coh_ctrl_size] 
                     + qc_main.qubits[sel_size + ctrl_size_max:])
-    print("A_0 construct complete")
+    # print("A_0 construct complete")
 
     ### Append other Kraus operator circuit
     for ind in range(1, kraus_count):
@@ -188,7 +188,7 @@ def higher_order_Lind_expansion(Lind: Lindbladian, K: int, q: int, t: float, K1:
         qc_elem_control = qc_elem.to_gate().control(num_ctrl_qubits = sel_size, ctrl_state = select_value)
         qc_main.append(qc_elem_control, qargs = qc_main.qubits[:sel_size] + qc_main.qubits[sel_size: sel_size + ctrl_size]
                         + qc_main.qubits[sel_size + ctrl_size_max:])
-    print("All Kraus operators constructed")
+    # print("All Kraus operators constructed")
 
     return qc_main, reg_sizes, coeff_sum_square, sel_state
     # return qc_main, reg_sizes, coeff_sum_square
@@ -261,14 +261,20 @@ def simulate_circuit_statevec(qc: QuantumCircuit, ini_state, sel_state, reg_size
     
     sel_size, ctrl_size, sys_size = reg_sizes
     qc_sim = QuantumCircuit(qc.num_qubits)
-    state_sys_ctrl = Statevector.from_label(ini_state + '0' * ctrl_size)
+    state_ctrl = Statevector.from_label('0' * ctrl_size)
+    if isinstance(ini_state, str):
+        state_sys_ctrl = Statevector.from_label(ini_state + '0' * ctrl_size)
+    elif isinstance(ini_state, Statevector):
+        state_sys_ctrl = ini_state.tensor(state_ctrl)
+    
+    
     state_tot = state_sys_ctrl.tensor(Statevector(sel_state))
     
     qc_sim.initialize(state_tot)
-
+    qc_sim = transpile(qc_sim, simulator, optimization_level=2)
     qc_sim.compose(qc, qc_sim.qubits, inplace=True)
     qc_sim.save_statevector(label = 'final_state') #type: ignore
-    qc_sim = transpile(qc_sim, simulator, optimization_level=2)
+    # qc_sim = transpile(qc_sim, simulator, optimization_level=2)
 
     ### Sim task I: Get final statevector
     
