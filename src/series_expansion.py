@@ -158,9 +158,7 @@ def higher_order_Lind_expansion(Lind: Lindbladian, K: int, q: int, t: float, K1:
     #Define the registers
     sel_size = int(np.ceil(np.log2(kraus_count))) 
     reg_sizes = [sel_size, ctrl_size_max, sys_size]
-    select_reg = QuantumRegister(sel_size, 'sel')
-    control_reg = QuantumRegister(ctrl_size_max, 'ctrl')
-    system_reg = QuantumRegister(sys_size, 'sys')
+ 
 
     ## Prepare superposition over selection register
     coeff_sum_square = sum([abs(c)**2 for c in coeff_sum_total])
@@ -171,25 +169,37 @@ def higher_order_Lind_expansion(Lind: Lindbladian, K: int, q: int, t: float, K1:
         weights[i] = nc
         sel_state[i] = np.sqrt(nc)
     
+    return qc_info, sel_state, reg_sizes, qc_coh_ctrl_size, qc_ensemble, kraus_count, ctrl_sizes, coeff_sum_square
+
+def construct_higher_order_circuit(Lind, K, q, t, K1, structure = 'basic'):
+
+    qc_info, sel_state, reg_sizes, qc_coh_ctrl_size, qc_ensemble, kraus_count, ctrl_sizes, coeff_sum_square = higher_order_Lind_expansion(Lind, K, q, t, K1)
+    sel_size, ctrl_size_max, sys_size = reg_sizes
+    
+    select_reg = QuantumRegister(sel_size, 'sel')
+    control_reg = QuantumRegister(ctrl_size_max, 'ctrl')
+    system_reg = QuantumRegister(sys_size, 'sys')
+
     qc_main = QuantumCircuit(select_reg, control_reg, system_reg)
     
-    
     ### Append A_0 = e^{Jt} circuit
-    qc_coh_control = qc_info[0].to_gate().control(num_ctrl_qubits = sel_size, ctrl_state = '0' * sel_size)
-    qc_main.append(qc_coh_control, qargs = qc_main.qubits[:sel_size] + qc_main.qubits[sel_size:sel_size + qc_coh_ctrl_size] 
-                    + qc_main.qubits[sel_size + ctrl_size_max:])
-    # print("A_0 construct complete")
-
-    ### Append other Kraus operator circuit
-    for ind in range(1, kraus_count):
-        qc_elem = qc_ensemble[ind -1]
-        ctrl_size = ctrl_sizes[ind - 1]
-        select_value = bin(ind)[2:].zfill(sel_size)
-        qc_elem_control = qc_elem.to_gate().control(num_ctrl_qubits = sel_size, ctrl_state = select_value)
-        qc_main.append(qc_elem_control, qargs = qc_main.qubits[:sel_size] + qc_main.qubits[sel_size: sel_size + ctrl_size]
+    if structure == 'basic':
+        qc_coh_control = qc_info[0].to_gate().control(num_ctrl_qubits = sel_size, ctrl_state = '0' * sel_size)
+        qc_main.append(qc_coh_control, qargs = qc_main.qubits[:sel_size] + qc_main.qubits[sel_size:sel_size + qc_coh_ctrl_size] 
                         + qc_main.qubits[sel_size + ctrl_size_max:])
-    # print("All Kraus operators constructed")
+        # print("A_0 construct complete")
 
+        ### Append other Kraus operator circuit
+        for ind in range(1, kraus_count):
+            qc_elem = qc_ensemble[ind -1]
+            ctrl_size = ctrl_sizes[ind - 1]
+            select_value = bin(ind)[2:].zfill(sel_size)
+            qc_elem_control = qc_elem.to_gate().control(num_ctrl_qubits = sel_size, ctrl_state = select_value)
+            qc_main.append(qc_elem_control, qargs = qc_main.qubits[:sel_size] + qc_main.qubits[sel_size: sel_size + ctrl_size]
+                            + qc_main.qubits[sel_size + ctrl_size_max:])
+    # print("All Kraus operators constructed")
+    elif structure == 'optimized':
+        pass
     return qc_main, reg_sizes, coeff_sum_square, sel_state
     # return qc_main, reg_sizes, coeff_sum_square
 
@@ -379,7 +389,72 @@ def construct_qobj_lind(Lind: Lindbladian, dim_sys: int):
                 current_state = current_state / np.trace(current_state)
 
         return current_state
+# ...existing code...
+def projection_op_dm_optimized(dm: DensityMatrix, reg_sizes_opt: list):
+    """
+    reg_sizes_opt = [sel_size, sel_aux_size, ctrl_size, sys_size]
+    where sel_aux_size = sel_size + 1 (top + sel_anc)
+    """
+    sel_size, sel_aux_size, ctrl_size, sys_size = reg_sizes_opt
 
+    proj_ctrl0 = Operator.from_label('0' * ctrl_size)
+    proj_sel_aux0 = Operator.from_label('0' * (sel_aux_size - 1)) if sel_aux_size > 1 else Operator(np.array([[1.0]]))
+    proj_top1 = Operator.from_label('1')
+    iden_sel = Operator.from_label('I' * sel_size)
+    iden_sys = Operator.from_label('I' * sys_size)
+
+    # qubit order in circuit is [top, sel, sel_anc, ctrl, sys]
+    # projector in same style as existing code (tensor from right to left blocks)
+    if sel_aux_size > 1:
+        proj_full = iden_sys.tensor(proj_ctrl0).tensor(proj_sel_aux0).tensor(iden_sel).tensor(proj_top1)
+    else:
+        proj_full = iden_sys.tensor(proj_ctrl0).tensor(iden_sel).tensor(proj_top1)
+
+    projected_dm = np.dot(np.dot(proj_full, dm), proj_full.adjoint())
+
+    # trace out all ancilla-like registers: top + sel + sel_anc + ctrl
+    anc_total = 1 + sel_size + (sel_aux_size - 1) + ctrl_size
+    projected_dm_sys = partial_trace(DensityMatrix(projected_dm), list(range(anc_total)))
+    return DensityMatrix(zero_small_complex(np.asarray(projected_dm_sys), tol=1e-6))
+
+
+def simulate_circuit_statevec_optimized(qc: QuantumCircuit, ini_state, sel_state, reg_sizes_opt: list):
+    """
+    Optimized-select simulator for circuit layout:
+    [top, sel, sel_anc, ctrl, sys]
+    """
+    simulator = AerSimulator(method='statevector')
+
+    sel_size, sel_aux_size, ctrl_size, sys_size = reg_sizes_opt
+    sel_anc_size = max(sel_aux_size - 1, 0)
+
+    qc_sim = QuantumCircuit(qc.num_qubits)
+
+    state_ctrl = Statevector.from_label('0' * ctrl_size)
+    state_sel_anc = Statevector.from_label('0' * sel_anc_size) if sel_anc_size > 0 else Statevector([1.0])
+    state_sel = Statevector(sel_state)
+    state_top = Statevector.from_label('1')
+
+    if isinstance(ini_state, str):
+        state_sys = Statevector.from_label(ini_state)
+    elif isinstance(ini_state, Statevector):
+        state_sys = ini_state
+    else:
+        raise TypeError("ini_state must be str or Statevector for statevector simulation.")
+
+    # Keep the same tensor style as existing code
+    state_tot = state_sys.tensor(state_ctrl).tensor(state_sel_anc).tensor(state_sel).tensor(state_top)
+
+    qc_sim.initialize(state_tot)
+    qc_sim = transpile(qc_sim, simulator, optimization_level=2)
+    qc_sim.compose(qc, qc_sim.qubits, inplace=True)
+    qc_sim.save_statevector(label='final_state')  # type: ignore
+
+    result = simulator.run(qc_sim, shots=1).result()
+    final_state = result.data()['final_state']
+    final_dm_sys = projection_op_dm_optimized(DensityMatrix(final_state), reg_sizes_opt)
+    return final_dm_sys
+# ...existing code...
 def simulate_circuit_repeat(qc: QuantumCircuit, ini_state, sel_state, coeff_sum: float, reg_sizes: list, repeat: int):
     """
     Parameters:
@@ -493,7 +568,8 @@ if __name__ == "__main__":
     final_dens = simulate_lindblad(H_qobj, L_qobj_list, ini_state_qobj, repeat * t, r = 10)
     print("Baseline final density:", final_dens)
     ### Create the evolution circuit
-    qc, reg_sizes, coeff_sum_sq, sel_state = higher_order_Lind_expansion(decay_lind, K, q, t, K1)
+    qc, reg_sizes, coeff_sum_sq, sel_state = construct_higher_order_circuit(decay_lind, K, q, t, K1)
+    higher_order_Lind_expansion(decay_lind, K, q, t, K1)
     
     ## Test I : Statevector simulation (evolve once )
     # final_state_sys = simulate_circuit_statevec(qc, ini_state = '+', sel_state = sel_state, reg_sizes = reg_sizes)

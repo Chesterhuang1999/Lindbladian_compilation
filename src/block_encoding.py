@@ -728,7 +728,7 @@ class BlockEncoding:
             qc = QuantumCircuit(sys_size)
             assert len(mat_list) == 1
             pauli_op, phase = Pauli(mat_list[0][0]), mat_list[0][1]
-            qc_pauli = QuantumCircuit(pauli_op.num_qubits)
+            qc_pauli = QuantumCircuit(pauli_op.num_qubits) #type: ignore
             qc_pauli.append(pauli_op, range(pauli_op.num_qubits)) #type: ignore
             qc_pauli.global_phase = np.angle(phase)
             qc_pauli = qc_pauli.decompose()
@@ -741,7 +741,7 @@ class BlockEncoding:
             
             if isinstance(ms, tuple) or isinstance(ms, list):
                 pauli_op, phase = Pauli(ms[0]), ms[1]
-                qc_pauli = QuantumCircuit(pauli_op.num_qubits)
+                qc_pauli = QuantumCircuit(pauli_op.num_qubits) #type:ignore
                 qc_pauli.append(pauli_op, range(pauli_op.num_qubits)) #type: ignore
                 qc_pauli.global_phase = np.angle(phase)
                 qc_pauli = qc_pauli.decompose()
@@ -754,11 +754,14 @@ class BlockEncoding:
             
             control_values =  bin(i)[2:].zfill(ctrl_size) 
             # control_values = ctrlv_dict.get(label)
+            # if len(qc_pauli.data) > 0 : ### Identity is ignored
+            ctrl_U_elem = U_elem.control(num_ctrl_qubits = ctrl_size, ctrl_state = control_values)
+            qc.append(ctrl_U_elem, range(ctrl_size + sys_size))
             if len(qc_pauli.data) > 0 : ### Identity is ignored
-                ctrl_U_elem = U_elem.control(num_ctrl_qubits = ctrl_size, ctrl_state = control_values)
-                qc.append(ctrl_U_elem, range(ctrl_size + sys_size))
                 mccount += (ctrl_size - 1) * len(qc_pauli.data)
-
+            else:
+                mccount += ctrl_size - 2
+                
         tcount = mccount * t_count_per_ctrl
         cxcount = mccount * cx_count_per_ctrl
         return qc, tcount, mccount, cxcount
@@ -799,17 +802,18 @@ class BlockEncoding:
                 else:
                     continue
             return candidate_bits
+        
         for i, mat in enumerate(mat_list):
             
-            
             pauli_op, phase = Pauli(mat[0]), mat[1]
-            qc_pauli = QuantumCircuit(pauli_op.num_qubits)
+            qc_pauli = QuantumCircuit(pauli_op.num_qubits) #type: ignore 
             qc_pauli.append(pauli_op, range(pauli_op.num_qubits)) #type: ignore
             qc_pauli.global_phase = np.angle(phase)
             qc_pauli = qc_pauli.decompose()
             numq = qc_pauli.num_qubits
             control_values = bin(i)[2:].zfill(ctrl_size)
             # index_remove = find_bit_to_remove(maxctrl_value, control_values)
+            pauli_length = len(qc_pauli.data)
 
             if i == 0:
                 cval_next = bin(1)[2:].zfill(ctrl_size)   
@@ -820,7 +824,7 @@ class BlockEncoding:
                     cxcount += cx_counts_per_ccx
                 opt_circuit.append(qc_pauli.to_gate().control(num_ctrl_qubits = 1, ctrl_state = '1'), list(range(2 * ctrl_size,2 * ctrl_size + 1 +  numq)))
                 opt_circuit.cx(anc_regs[ctrl_size - 2], anc_regs[ctrl_size - 1])
-                cxcount += 1
+                cxcount += 1 + pauli_length
             elif i == len(mat_list) - 1:
                 cval_prev = bin(i - 1)[2:].zfill(ctrl_size)
                 diff_prev = next(j for j in range(ctrl_size) if cval_prev[j] != control_values[j])
@@ -831,6 +835,7 @@ class BlockEncoding:
                         tcount += t_counts_per_ccx
                         cxcount += cx_counts_per_ccx
                 opt_circuit.append(qc_pauli.to_gate().control(num_ctrl_qubits = 1, ctrl_state = '1'), list(range(2 * ctrl_size,2 * ctrl_size + 1 + numq)))
+                cxcount += pauli_length
                 for j in range(ctrl_size - 1, -1, -1):
                     apply_right_enc(j)
                     mccount += 1
@@ -849,6 +854,7 @@ class BlockEncoding:
                         cxcount += cx_counts_per_ccx
                 ## Apply the controlled circuit
                 opt_circuit.append(qc_pauli.to_gate().control(num_ctrl_qubits = 1, ctrl_state = '1'), list(range(2 * ctrl_size, 2 * ctrl_size + 1 + numq)))
+                cxcount += pauli_length
                 diff_next = next(j for j in range(ctrl_size) if cval_next[j] != control_values[j])
                 ## Apply right encodings from diff_next to the end
                 if diff_next != ctrl_size - 1:
@@ -863,6 +869,7 @@ class BlockEncoding:
                     cxcount += 1
                 else:
                     opt_circuit.cx(0, anc_regs[0])
+        opt_circuit.x(0)
         return opt_circuit, tcount, mccount, cxcount
     
 
@@ -963,7 +970,7 @@ class BlockEncoding:
                 coeff_mode = 0.0 + 0.0j
            
             coeff_mode_dict[ctrl_value] = coeff_mode
-
+        
         self.coeff_mode_dict = coeff_mode_dict
         self.vec_phase_lookup = build_vec_phase_lookup(chosen_matrix, chosen_phases)
         self.basis_modes_with_phase, self.nonbasis_modes_with_phase = extract_basis_modes_with_phases(additional_modes, self.vec_phase_lookup)
@@ -974,16 +981,20 @@ class BlockEncoding:
         sys_size = self.sys_size
         coeff_mode_dict, ctrl_size = self.find_optimal_order_matrices()
         modes_with_phase = self.mobius_phase_result['g_modes_with_phase']
+        
         ctrl_reg, sys_reg = QuantumRegister(ctrl_size, 'ctrl'), QuantumRegister(sys_size, 'sys')
         qc_u = QuantumCircuit(ctrl_reg, sys_reg)
         mccount = 0
         cxcount = 0
         self.coeff_list_ordered = np.zeros((1 << ctrl_size), dtype = float)
-        if '0' * ctrl_size in coeff_mode_dict:
-            self.coeff_list_ordered[0] = coeff_mode_dict['0' * ctrl_size]
+        # if '0' * ctrl_size in coeff_mode_dict:
+        #     self.coeff_list_ordered[0] = coeff_mode_dict['0' * ctrl_size]
+        for ctrl_value, coeff in coeff_mode_dict.items():
+            self.coeff_list_ordered[int(ctrl_value, 2)] = coeff
+        
         for pauli_label, ctrl_value, phase in modes_with_phase:
             position = int(ctrl_value, 2)
-            self.coeff_list_ordered[position] = coeff_mode_dict[ctrl_value]
+            # self.coeff_list_ordered[position] = coeff_mode_dict[ctrl_value]
             qc_pauli = QuantumCircuit(len(pauli_label))
             pauli_op = Pauli(pauli_label)
             qc_pauli.append(pauli_op, range(len(pauli_label)))
@@ -1041,16 +1052,18 @@ class BlockEncoding:
         cx_per_toffoli = 4
         sum_coeff = sum([abs(c) for c in coeff_list])
         norm_coeffs = [abs(c)/sum_coeff for c in coeff_list]
+
         probs = np.zeros(2**ctrl_size, dtype = float)
         amps = np.zeros(2**ctrl_size, dtype = float)
         for i, nc in enumerate(norm_coeffs):
             probs[i] = nc
             amps[i] = np.sqrt(nc)
+
+        # qc = lcu_prepare_tree(probs) 
+        # print(probs)
+        qc = QuantumCircuit(ctrl_size)
+        qc.append(StatePreparation(Statevector(amps)), range(ctrl_size))
         
-        qc = lcu_prepare_tree(probs) 
-        # qc = QuantumCircuit(ctrl_size)
-        # qc.append(StatePreparation(Statevector(amps)), range(ctrl_size))
-      
         return qc #type: ignore
 
     def prepare_tree_with_side_effect_count(self, weights):
@@ -1334,7 +1347,9 @@ if __name__ == "__main__":
     Random_Lind = Lindbladian(H_eff, [])
     H_eff = Random_Lind.H
     J = BlockEncoding(H_eff)
-    qc_opt_line = J.circuit(opt = 'Matrix-order')
+    qc_opt_line = J.circuit(opt = 'Ctrl-line')
+    print(qc_opt_line.draw())
+    qc_no = J.circuit(opt = 'No')
     # J = BlockEncoding(ms)
     # J.find_optimal_order_matrices()
     # qc_nopt = J.circuit(opt = 'No')

@@ -1,4 +1,15 @@
-Number of successful cases with error < 1e-3: 39 out of 50
-Average QDrift gate counts set:  cx: 11592.871794871795 u3: 11380.358974358975
-qsvt gate counts set with pauli-level optimization:  cx: 5468.0 u3: 6809.871794871795
-qsvt gate counts with no optimization:  cx: 15593.333333333334 u3: 19234.71794871795
+
+
+Average QDrift gate counts set:  cx: 13497.36 u3: 18600.24
+qsvt gate counts set with pauli-level optimization:  cx: 5228.12 u3: 6911.18
+qsvt gate counts with no optimization:  cx: 16304.22 u3: 21233.96
+
+Average Trotter gate counts set:  cx: 30493.079999999998 u3: 41420.96
+Average QDrift gate counts set:  cx: 20209.48 u3: 27018.78
+qsvt gate counts set with pauli-level optimization:  cx: 5145.32 u3: 6784.86
+qsvt gate counts with no optimization:  cx: 15598.24 u3: 20310.6
+
+Average Trotter gate counts set:  cx: 59948.880000000005 u3: 82763.81999999999
+Average QDrift gate counts set:  cx: 19788.92 u3: 27075.4
+qsvt gate counts set with pauli-level optimization: cx: 5056.38 u3: 6680.3
+qsvt gate counts with no optimization:  cx: 15650.32 u3: 20383.26
