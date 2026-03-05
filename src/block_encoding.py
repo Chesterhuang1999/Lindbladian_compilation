@@ -711,7 +711,6 @@ class BlockEncoding:
         self.mat_list = []
         for matrix, _ in J.instances:
             if isinstance(matrix, PauliAtom):
-
                 self.mat_list.append((matrix.expr, matrix.phase))
             else:
                 self.mat_list.append(matrix.to_operator().data)
@@ -767,27 +766,38 @@ class BlockEncoding:
         return qc, tcount, mccount, cxcount
     ## Optimized version of multiplexed_u implementation (Babbush 2018)
     def mulplex_U_opt(self, mat_list, ctrl_size, sys_size):
+
         from qiskit.circuit.library import XGate
         mccount = 0
         tcount = 0
         cxcount = 0
         t_counts_per_ccx = 4
         cx_counts_per_ccx = 4  
-        opt_circuit = QuantumCircuit(1 + 2 * ctrl_size + sys_size)
-        opt_circuit.x(0)
-        sel_regs = [2 * j + 1 for j in range(ctrl_size)]
-        anc_regs = [2 * j + 2 for j in range(ctrl_size)]
+        
+        opt_circuit = QuantumCircuit(2 * ctrl_size + sys_size)
+        # sel_regs = [2 * j  for j in range(ctrl_size)]
+        # anc_regs = [2 * j + 1 for j in range(ctrl_size)]
+        anc_regs = [2 * (ctrl_size - 1 - j) for j in range(ctrl_size)]
+        sel_regs = [2 * (ctrl_size - 1 - j) + 1 for j in range(ctrl_size)]
         def apply_left_enc(j):
             opt_circuit.reset(anc_regs[j])
             ctrl_bval = control_values[j]
             ccxgate_c = XGate().control(num_ctrl_qubits = 2, ctrl_state = ctrl_bval + '1')
-            top = 0 if j == 0 else anc_regs[j - 1]
-            opt_circuit.append(ccxgate_c, [top, sel_regs[j], anc_regs[j]])
+            cxgate_c  = XGate().control(num_ctrl_qubits = 1, ctrl_state = ctrl_bval)
+            if j == 0:
+                opt_circuit.append(cxgate_c, [2 * ctrl_size - 1, anc_regs[0]])
+            # top = 0 if j == 0 else anc_regs[j - 1]
+            else:
+                opt_circuit.append(ccxgate_c, [anc_regs[j - 1], sel_regs[j], anc_regs[j]])
         def apply_right_enc(j):
             ctrl_bval = control_values[j]
             ccxgate_c = XGate().control(num_ctrl_qubits = 2, ctrl_state = ctrl_bval + '1')
-            top = 0 if j == 0 else anc_regs[j - 1]
-            opt_circuit.append(ccxgate_c, [top, sel_regs[j], anc_regs[j]])
+            cxgate_c  = XGate().control(num_ctrl_qubits = 1, ctrl_state = ctrl_bval)
+            # top = 0 if j == 0 else anc_regs[j - 1]
+            if j == 0:
+                opt_circuit.append(cxgate_c, [2 * ctrl_size - 1, anc_regs[0]])
+            else:
+                opt_circuit.append(ccxgate_c, [anc_regs[j - 1], sel_regs[j], anc_regs[j]])
             opt_circuit.reset(anc_regs[j])
 
         maxctrl_value = bin(len(mat_list) - 1)[2:].zfill(ctrl_size)
@@ -806,6 +816,7 @@ class BlockEncoding:
         for i, mat in enumerate(mat_list):
             
             pauli_op, phase = Pauli(mat[0]), mat[1]
+            
             qc_pauli = QuantumCircuit(pauli_op.num_qubits) #type: ignore 
             qc_pauli.append(pauli_op, range(pauli_op.num_qubits)) #type: ignore
             qc_pauli.global_phase = np.angle(phase)
@@ -822,7 +833,8 @@ class BlockEncoding:
                     mccount += 1
                     tcount += t_counts_per_ccx
                     cxcount += cx_counts_per_ccx
-                opt_circuit.append(qc_pauli.to_gate().control(num_ctrl_qubits = 1, ctrl_state = '1'), list(range(2 * ctrl_size,2 * ctrl_size + 1 +  numq)))
+                # opt_circuit.append(qc_pauli.to_gate().control(num_ctrl_qubits = 1, ctrl_state = '1'), list(range(2 * ctrl_size - 1 , 2 * ctrl_size + numq)))
+                opt_circuit.append(qc_pauli.to_gate().control(num_ctrl_qubits = 1, ctrl_state = '1'), [0] + list(range(2 * ctrl_size, 2 * ctrl_size + numq)))
                 opt_circuit.cx(anc_regs[ctrl_size - 2], anc_regs[ctrl_size - 1])
                 cxcount += 1 + pauli_length
             elif i == len(mat_list) - 1:
@@ -834,7 +846,8 @@ class BlockEncoding:
                         mccount += 1
                         tcount += t_counts_per_ccx
                         cxcount += cx_counts_per_ccx
-                opt_circuit.append(qc_pauli.to_gate().control(num_ctrl_qubits = 1, ctrl_state = '1'), list(range(2 * ctrl_size,2 * ctrl_size + 1 + numq)))
+                # opt_circuit.append(qc_pauli.to_gate().control(num_ctrl_qubits = 1, ctrl_state = '1'), list(range(2 * ctrl_size - 1,2 * ctrl_size + numq)))
+                opt_circuit.append(qc_pauli.to_gate().control(num_ctrl_qubits = 1, ctrl_state = '1'), [0] + list(range(2 * ctrl_size, 2 * ctrl_size + numq)))
                 cxcount += pauli_length
                 for j in range(ctrl_size - 1, -1, -1):
                     apply_right_enc(j)
@@ -853,7 +866,8 @@ class BlockEncoding:
                         tcount += t_counts_per_ccx
                         cxcount += cx_counts_per_ccx
                 ## Apply the controlled circuit
-                opt_circuit.append(qc_pauli.to_gate().control(num_ctrl_qubits = 1, ctrl_state = '1'), list(range(2 * ctrl_size, 2 * ctrl_size + 1 + numq)))
+                # opt_circuit.append(qc_pauli.to_gate().control(num_ctrl_qubits = 1, ctrl_state = '1'), list(range(2 * ctrl_size - 1, 2 * ctrl_size  + numq)))
+                opt_circuit.append(qc_pauli.to_gate().control(num_ctrl_qubits = 1, ctrl_state = '1'), [0] + list(range(2 * ctrl_size, 2 * ctrl_size + numq)))
                 cxcount += pauli_length
                 diff_next = next(j for j in range(ctrl_size) if cval_next[j] != control_values[j])
                 ## Apply right encodings from diff_next to the end
@@ -868,8 +882,9 @@ class BlockEncoding:
                     opt_circuit.cx(anc_regs[diff_next - 1], anc_regs[diff_next])
                     cxcount += 1
                 else:
-                    opt_circuit.cx(0, anc_regs[0])
-        opt_circuit.x(0)
+                    # opt_circuit.cx(0, anc_regs[0])
+                    opt_circuit.x(anc_regs[0])
+        # opt_circuit.x(0)
         return opt_circuit, tcount, mccount, cxcount
     
 
@@ -1187,10 +1202,10 @@ class BlockEncoding:
             qc.compose(qc_select.inverse(), qubits=ctrl, inplace=True) #type: ignore
         elif opt == 'Ctrl-line':
             qc_u, tcount, mccount, cxcount = self.mulplex_U_opt(self.mat_list, self.ctrl_size, self.sys_size)
+            qc = QuantumCircuit(qc_u.num_qubits, name = "BlockEncoding")
             qc_select = self.mulplex_B(self.coeff_list, self.ctrl_size)
             ctrl_index = [2 * j + 1 for j in range(self.ctrl_size)]
-            qc = QuantumCircuit(qc_u.num_qubits, name = "BlockEncoding")
-            qc.compose(qc_select, qubits = ctrl_index, inplace = True) #type: ignore 
+            qc.compose(qc_select, qubits = ctrl_index, inplace = True) #type: ignore
             qc.compose(qc_u, qubits = qc.qubits, inplace = True)
             qc.compose(qc_select.inverse(), qubits = ctrl_index, inplace = True) #type: ignore
         elif opt == 'Matrix-order':

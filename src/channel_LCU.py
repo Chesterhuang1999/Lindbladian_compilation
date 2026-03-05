@@ -185,7 +185,7 @@ def multiplexed_B(ctrl_size:int, select_size: int, coeffs: list):
 
 
 
-def channel_to_LCU (ensem: channel_ensemble) -> list:
+def channel_to_LCU (ensem: channel_ensemble, structure = 'basic', opt = 'No') -> list:
     """
     Convert the channel to LCU circuit, only allow single channel for this method.
     
@@ -215,25 +215,45 @@ def channel_to_LCU (ensem: channel_ensemble) -> list:
 
     ## Channels are viewed as Kraus operators (matrixsums)
     coeff_sums = [ms.pauli_norm() for ms in channel]
-    ctrl = QuantumRegister(ctrl_size, 'c')
-    select = QuantumRegister(select_size, 's')
+    
     sys = QuantumRegister(sys_size, 'sys')
-    qc = QuantumCircuit(select, ctrl, sys)
+    
     ## Prepare the superposition state 
     LCU_ini = prep_sup_state(coeff_sums)
-    qc.compose(LCU_ini, qubits=list(range(select_size)), inplace=True) 
-    ## First construct elementary block encodings then select them using select register. 
-    for i, ms in enumerate(channel):
-        ctrl_value = bin(i)[2:].zfill(select_size)
-        qc_be_ms = BlockEncoding(ms).circuit(opt = 'No')
-        ctrl_size_ms = qc_be_ms.num_qubits - sys_size
-        U_be_ms = qc_be_ms.to_gate().control(num_ctrl_qubits=select_size, ctrl_state=ctrl_value)
-        qc.append(U_be_ms, qargs = list(select) + list(ctrl[:ctrl_size_ms]) + list(sys))
     
+    ## First construct elementary block encodings then select them using select register. 
+    if structure == 'basic':
+        ctrl = QuantumRegister(ctrl_size, 'c')
+        select = QuantumRegister(select_size, 's')
+        qc = QuantumCircuit(select, ctrl, sys)
+        qc.compose(LCU_ini, qubits=list(range(select_size)), inplace=True) 
+        for i, ms in enumerate(channel):
+            ctrl_value = bin(i)[2:].zfill(select_size)
+            ctrl_v_rev = ctrl_value[::-1]
+            qc_be_ms = BlockEncoding(ms).circuit(opt = opt)
+            ctrl_size_ms = qc_be_ms.num_qubits - sys_size
+            # U_be_ms = qc_be_ms.to_gate().control(num_ctrl_qubits=select_size, ctrl_state=ctrl_value)
+            U_be_ms = qc_be_ms.to_gate().control(num_ctrl_qubits=select_size, ctrl_state=ctrl_v_rev)
+            qc.append(U_be_ms, qargs = list(select) + list(ctrl[:ctrl_size_ms]) + list(sys))
+            qubit_indexes = [list(range(ctrl_size)), list(range(ctrl_size, ctrl_size + select_size)), 
+                             list(range(ctrl_size + select_size, ctrl_size + select_size + sys_size))]
+    elif structure == 'opt':
+        circuits = []
+        qc = QuantumCircuit(2 * select_size + ctrl_size + sys_size)
+        
+        select_indexes = [2 * j for j in range(select_size)]
+        anc_indexes = [2 * j + 1 for j in range(select_size)]
+        ctrl_indexes = list(range(2 * select_size, 2 * select_size + ctrl_size))
+        sys_indexes = list(range(2 * select_size + ctrl_size, 2 * select_size + ctrl_size + sys_size))
+        qc.compose(LCU_ini, qubits = select_indexes, inplace = True)
+        for i, ms in enumerate(channel):
+            qc_be_ms = BlockEncoding(ms).circuit(opt = opt)
+            circuits.append(qc_be_ms)
+        qc, tcount, mccount, cxcount = mulplex_U_opt(qc, circuits, select_size, ctrl_size , sys_size)
+        qubit_indexes = [select_indexes, anc_indexes, ctrl_indexes, sys_indexes]
     qc.save_statevector('final_state') #type: ignore
-
-    qubit_regs = [ctrl, select, sys]
-    return [qc, qubit_regs]
+    # qubit_regs = [ctrl, select, sys]
+    return [qc, qubit_indexes]
 
 
 ### Preparation for AA: channel_to_LCU operates over encoded states 
@@ -392,10 +412,12 @@ def get_postmeas_density(final_sv: Statevector, qubit_regs: list):
     """
     if len(qubit_regs) == 3:
         ctrl, select, sys = qubit_regs
-    elif len(qubit_regs) == 5:
-        greg, anc, ctrl, select, sys = qubit_regs
-    ctrl_size, select_size, sys_size = len(ctrl), len(select), len(sys)
-    ctrl_size = len(ctrl)
+        ctrl_size, select_size, sys_size = len(ctrl), len(select), len(sys)
+    elif len(qubit_regs) == 4:
+        select, anc, ctrl, sys = qubit_regs
+        select_size, anc_size, ctrl_size, sys_size = len(select), len(anc), len(ctrl), len(sys)
+    else:
+        raise ValueError("Unexpected register layout, qubit_regs should be either [ctrl, select, sys] or [select, anc, ctrl, sys]")
 
     if len(qubit_regs) == 3:
         # final_sv is prepared as: sys_state.tensor(ctrl_state.tensor(sel_state))
@@ -417,24 +439,43 @@ def get_postmeas_density(final_sv: Statevector, qubit_regs: list):
         # rho_sys[a,b] = sum_s amp[a,s] * conj(amp[b,s])
         system_density_np = np.einsum('as,bs->ab', post_amp_sys_sel, post_amp_sys_sel.conj())
         trace_val = np.trace(system_density_np)
+        
         if abs(trace_val) > 1e-14:
             system_density_np = system_density_np / trace_val
         system_density = DensityMatrix(system_density_np)
-    else:
-        ### Fallback for encoded-AA register layout
-        proj_0 = Operator.from_label('0' * ctrl_size)
-        iden1 = Operator.from_label('I' * select_size)
-        iden2 = Operator.from_label('I' * sys_size)
-        proj_full = (iden1.tensor(proj_0)).tensor(iden2)
+        
+    elif len(qubit_regs) == 4:
+        # Optimized layout: qubit_regs = [select_index, anc_index, ctrl_index, sys_index]
+        # Extract amplitudes from entries where anc_index and ctrl_index are fixed to |0...0>,
+        # keeping only select+sys degrees of freedom.
+        data = np.asarray(final_sv.data, dtype=complex)
+        dim_sys = 1 << sys_size
+        dim_sel = 1 << select_size
 
-        post_vec = np.dot(proj_full, final_sv.data)
-        system_density = partial_trace(DensityMatrix(post_vec), list(range(ctrl_size + select_size)))
-        system_density = system_density / system_density.trace()
-    ## Trace out the control and select qubits
-    # if len(qubit_regs) == 3:
-    #     system_density = partial_trace(post_density, list(range(ctrl_size + select_size)))
-    # elif len(qubit_regs) == 5:
-    #     system_density = partial_trace(post_density, list(range(len(greg) + 1 + ctrl_size + select_size)))
+        post_amp_sys_sel = np.zeros((dim_sys, dim_sel), dtype=complex)
+
+        def place_bits(base_idx: int, local_idx: int, reg_qubits: list[int]) -> int:
+            out = base_idx
+            for bit_pos, qubit_id in enumerate(reg_qubits):
+                if ((local_idx >> bit_pos) & 1) == 1:
+                    out |= (1 << qubit_id)
+            return out
+
+        # anc_index and ctrl_index bits are fixed to 0 by construction (base_idx = 0)
+        for sys_idx in range(dim_sys):
+            for sel_idx in range(dim_sel):
+                flat_idx = 0
+                flat_idx = place_bits(flat_idx, sel_idx, select)
+                flat_idx = place_bits(flat_idx, sys_idx, sys)
+                post_amp_sys_sel[sys_idx, sel_idx] = data[flat_idx]
+
+        # Partial trace over select register
+        system_density_np = np.einsum('as,bs->ab', post_amp_sys_sel, post_amp_sys_sel.conj())
+        trace_val = np.trace(system_density_np)
+        if abs(trace_val) > 1e-14:
+            system_density_np = system_density_np / trace_val
+        system_density = DensityMatrix(system_density_np)
+
     
     return system_density
 def construct_qobj_lind(Lind: Lindbladian, dim_sys: int):
@@ -463,19 +504,24 @@ def simulate_circuit(circuit: QuantumCircuit, ini_state: Statevector, qubit_regs
     final_sv = approx_state(Statevector(final_sv), tol=1e-6)
     system_density_final = get_postmeas_density(final_sv, qubit_regs).data
     
-    ## Certify that the circuit is well-behaved; We only need to measure the control register
-    # creg = ClassicalRegister(len(ctrl), 'clval')
-    # qc_test.add_register(creg)
-    # for i in range(len(ctrl)):
-    #     qc_test.measure(i + qubit_size[1], creg[i])
-    # result = simulator.run(qc_test, shots = N, initial_state=ini_state).result()
-    # success_prob = result.get_counts()['0'*len(ctrl)] / N
-
     return DensityMatrix(system_density_final)
+
+
+def simulate_circuit_opt(circuit: QuantumCircuit, ini_state: Statevector, qubit_regs: list):
+    simulator = AerSimulator()
+    qc_test = deepcopy(circuit)
+    
+    ## Distinguish the type of registers using length of qubit_regs
+   
+    
+    return DensityMatrix(system_density_final)
+
+
+
 
 if __name__ == "__main__":
    
-    test_case = 2
+    test_case = 4
 
     ### Test II: A simple Lindbladian 
     ### A transverse field Ising model Lindbladian
@@ -547,6 +593,7 @@ if __name__ == "__main__":
         norm = channel_norm_zero(channel_Lind, Statevector.from_label('0' * qubit_size[-1]))
         ini_state = Statevector.from_label('0' * sum(qubit_size))
         final_sv = simulate_circuit(LCU_encoded, ini_state = ini_state, qubit_regs = qubit_regs )
+
 
 
     

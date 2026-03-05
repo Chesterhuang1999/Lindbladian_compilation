@@ -264,13 +264,133 @@ def prep_sup_state(coeffs: list) -> QuantumCircuit:
     qubit_length = int(np.ceil(np.log2(M)))
     state_vector = np.zeros(2**qubit_length, dtype=complex)
     for j in range(M):
-        state_vector[j] = normalized_coeffs[j]
+        rev_j = bin(j)[2:].zfill(qubit_length)[::-1]
+        rev_j_int = int(rev_j, 2)
+        
+        # state_vector[j] = normalized_coeffs[j] 
+        state_vector[rev_j_int] = normalized_coeffs[j]
 
     state_vector = Statevector(state_vector)
     qc = QuantumCircuit(qubit_length)
     prep_gate = StatePreparation(state_vector)
     qc.append(prep_gate, range(qubit_length))
     return qc
+
+def mulplex_U_opt(opt_circuit, circuits, ctrl_size, sub_ctrl_size, sys_size):
+
+    from qiskit.circuit.library import XGate
+    mccount = 0
+    tcount = 0
+    cxcount = 0
+    t_counts_per_ccx = 4
+    cx_counts_per_ccx = 4  
+    sub_circuit_size = sub_ctrl_size + sys_size
+    # opt_circuit = QuantumCircuit(2 * ctrl_size + sub_circuit_size)
+    sel_regs = [2 * j  for j in range(ctrl_size)]
+    anc_regs = [2 * j + 1 for j in range(ctrl_size)]
+    # anc_regs = [2 * (ctrl_size - 1 - j) for j in range(ctrl_size)]
+    # sel_regs = [2 * (ctrl_size - 1 - j) + 1 for j in range(ctrl_size)]
+    def apply_left_enc(j):
+        opt_circuit.reset(anc_regs[j])
+        ctrl_bval = control_values[j]
+        ccxgate_c = XGate().control(num_ctrl_qubits = 2, ctrl_state = ctrl_bval + '1')
+        cxgate_c  = XGate().control(num_ctrl_qubits = 1, ctrl_state = ctrl_bval)
+        if j == 0:
+            opt_circuit.append(cxgate_c, [0, anc_regs[0]])
+        # top = 0 if j == 0 else anc_regs[j - 1]
+        else:
+            opt_circuit.append(ccxgate_c, [anc_regs[j - 1], sel_regs[j], anc_regs[j]])
+    def apply_right_enc(j):
+        ctrl_bval = control_values[j]
+        ccxgate_c = XGate().control(num_ctrl_qubits = 2, ctrl_state = ctrl_bval + '1')
+        cxgate_c  = XGate().control(num_ctrl_qubits = 1, ctrl_state = ctrl_bval)
+        # top = 0 if j == 0 else anc_regs[j - 1]
+        if j == 0:
+            opt_circuit.append(cxgate_c, [0, anc_regs[0]])
+        else:
+            opt_circuit.append(ccxgate_c, [anc_regs[j - 1], sel_regs[j], anc_regs[j]])
+        opt_circuit.reset(anc_regs[j])
+    
+    for i, circ in enumerate(circuits):
+        ctrl_numq = circ.num_qubits - sys_size
+        sys_start = 2 * ctrl_size + sub_ctrl_size
+        tqc = transpile(circ, basis_gates=['cx', 'u3'], optimization_level = 1)
+        control_values = bin(i)[2:].zfill(ctrl_size)
+        ops_raw = tqc.count_ops()
+        ops = {str(k): int(v) for k, v in ops_raw.items()}
+
+        sub_cxcount, sub_tcount = int(ops.get('cx', 0)), int(ops.get('u3', 0))
+        
+        if i == 0:
+            cval_next = bin(1)[2:].zfill(ctrl_size)   
+            for j in range(ctrl_size):
+                apply_left_enc(j)
+                mccount += 1
+                tcount += t_counts_per_ccx
+                cxcount += cx_counts_per_ccx
+
+            
+            opt_circuit.append(circ.to_gate().control(num_ctrl_qubits = 1, ctrl_state = '1'), 
+                               list(range(2 * ctrl_size - 1, 2 * ctrl_size + ctrl_numq)) + 
+                               list(range(sys_start, sys_start + sys_size)))
+            
+            opt_circuit.cx(anc_regs[ctrl_size - 2], anc_regs[ctrl_size - 1])
+            cxcount += sub_tcount
+            mccount += sub_cxcount
+        elif i == len(circuits) - 1:
+            cval_prev = bin(i - 1)[2:].zfill(ctrl_size)
+            diff_prev = next(j for j in range(ctrl_size) if cval_prev[j] != control_values[j])
+            if diff_prev != ctrl_size - 1:
+                for j in range(diff_prev + 1, ctrl_size):
+                    apply_left_enc(j)
+                    mccount += 1
+                    tcount += t_counts_per_ccx
+                    cxcount += cx_counts_per_ccx
+            
+            opt_circuit.append(circ.to_gate().control(num_ctrl_qubits = 1, ctrl_state = '1'), 
+                               list(range(2 * ctrl_size - 1, 2 * ctrl_size + ctrl_numq)) + 
+                               list(range(sys_start, sys_start + sys_size)))
+            mccount += sub_cxcount
+            for j in range(ctrl_size - 1, -1, -1):
+                apply_right_enc(j)
+                mccount += 1
+                tcount += t_counts_per_ccx
+                cxcount += cx_counts_per_ccx
+        else:
+            cval_prev, cval_next = bin(i - 1)[2:].zfill(ctrl_size), bin(i + 1)[2:].zfill(ctrl_size)
+            ## Find the first bit that differs
+            diff_prev = next(j for j in range(ctrl_size) if cval_prev[j] != control_values[j])
+            ## Apply left encodings from diff_prev to the end
+            if diff_prev != ctrl_size - 1:
+                for j in range(diff_prev + 1, ctrl_size):
+                    apply_left_enc(j)
+                    mccount += 1
+                    tcount += t_counts_per_ccx
+                    cxcount += cx_counts_per_ccx
+            ## Apply the controlled circuit
+            
+            opt_circuit.append(circ.to_gate().control(num_ctrl_qubits = 1, ctrl_state = '1'), 
+                               list(range(2 * ctrl_size - 1, 2 * ctrl_size + ctrl_numq)) + 
+                               list(range(sys_start, sys_start + sys_size)))
+            cxcount += sub_tcount
+            mccount += sub_cxcount
+            diff_next = next(j for j in range(ctrl_size) if cval_next[j] != control_values[j])
+            ## Apply right encodings from diff_next to the end
+            if diff_next != ctrl_size - 1:
+                for j in range(ctrl_size - 1, diff_next, -1):
+                    apply_right_enc(j)
+                    mccount += 1
+                    tcount += t_counts_per_ccx
+                    cxcount += cx_counts_per_ccx
+            ## Apply a CX to flip the differed bit
+            if diff_next != 0:
+                opt_circuit.cx(anc_regs[diff_next - 1], anc_regs[diff_next])
+                cxcount += 1
+            else:
+                opt_circuit.x(anc_regs[0])
+
+    return opt_circuit, cxcount, tcount, mccount
+
 
 def exp_term_expansion(J: Matrixsum, K: int, t: float):
     J.mul_coeffs(-1j)
@@ -336,101 +456,6 @@ def quadrature_points_N_weights(k: int, q: int, t: float, samp_pts:list):
         new_w.append(weight)
     return new_x, new_w
 
-def select_opt(circuits, ctrl_size, sys_size):
-    from qiskit.circuit.library import XGate
-    mccount = 0
-    tcount = 0
-    cxcount = 0
-    t_counts_per_ccx = 4
-    cx_counts_per_ccx = 4  
-    opt_circuit = QuantumCircuit(1 + 2 * ctrl_size + sys_size)
-    opt_circuit.x(0)
-    sel_regs = [2 * j + 1 for j in range(ctrl_size)]
-    anc_regs = [2 * j + 2 for j in range(ctrl_size)]
-    def apply_left_enc(j):
-        opt_circuit.reset(anc_regs[j])
-        ctrl_bval = control_values[j]
-        ccxgate_c = XGate().control(num_ctrl_qubits = 2, ctrl_state = ctrl_bval + '1')
-        top = 0 if j == 0 else anc_regs[j - 1]
-        opt_circuit.append(ccxgate_c, [top, sel_regs[j], anc_regs[j]])
-    def apply_right_enc(j):
-        ctrl_bval = control_values[j]
-        ccxgate_c = XGate().control(num_ctrl_qubits = 2, ctrl_state = ctrl_bval + '1')
-        top = 0 if j == 0 else anc_regs[j - 1]
-        opt_circuit.append(ccxgate_c, [top, sel_regs[j], anc_regs[j]])
-        opt_circuit.reset(anc_regs[j])
-
-    maxctrl_value = bin(len(circuits) - 1)[2:].zfill(ctrl_size)
-
-    def find_bit_to_remove(max_val, cur_val):
-        candidate_bits = []
-        for j in range(ctrl_size):
-            if max_val[j] != cur_val[j]:
-                return candidate_bits
-            elif max_val[j] == '0' and cur_val[j] == '0':
-                candidate_bits.append(j)
-            else:
-                continue
-        return candidate_bits
-    for i, sub_circuit in enumerate(circuits):
-        numq = sub_circuit.num_qubits
-        control_values = bin(i)[2:].zfill(ctrl_size)
-        # index_remove = find_bit_to_remove(maxctrl_value, control_values)
-
-        if i == 0:
-            cval_next = bin(1)[2:].zfill(ctrl_size)   
-            for j in range(ctrl_size):
-                apply_left_enc(j)
-                mccount += 1
-                tcount += t_counts_per_ccx
-                cxcount += cx_counts_per_ccx
-            opt_circuit.append(sub_circuit.to_gate().control(num_ctrl_qubits = 1, ctrl_state = '1'), list(range(2 * ctrl_size,2 * ctrl_size + 1 +  numq)))
-            opt_circuit.cx(anc_regs[ctrl_size - 2], anc_regs[ctrl_size - 1])
-            cxcount += 1
-        elif i == len(circuits) - 1:
-            cval_prev = bin(i - 1)[2:].zfill(ctrl_size)
-            diff_prev = next(j for j in range(ctrl_size) if cval_prev[j] != control_values[j])
-            if diff_prev != ctrl_size - 1:
-                for j in range(diff_prev + 1, ctrl_size):
-                    apply_left_enc(j)
-                    mccount += 1
-                    tcount += t_counts_per_ccx
-                    cxcount += cx_counts_per_ccx
-            opt_circuit.append(sub_circuit.to_gate().control(num_ctrl_qubits = 1, ctrl_state = '1'), list(range(2 * ctrl_size,2 * ctrl_size + 1 + numq)))
-            for j in range(ctrl_size - 1, -1, -1):
-                apply_right_enc(j)
-                mccount += 1
-                tcount += t_counts_per_ccx
-                cxcount += cx_counts_per_ccx
-        else:
-            cval_prev, cval_next = bin(i - 1)[2:].zfill(ctrl_size), bin(i + 1)[2:].zfill(ctrl_size)
-            ## Find the first bit that differs
-            diff_prev = next(j for j in range(ctrl_size) if cval_prev[j] != control_values[j])
-            ## Apply left encodings from diff_prev to the end
-            if diff_prev != ctrl_size - 1:
-                for j in range(diff_prev + 1, ctrl_size):
-                    apply_left_enc(j)
-                    mccount += 1
-                    tcount += t_counts_per_ccx
-                    cxcount += cx_counts_per_ccx
-            ## Apply the controlled circuit
-            opt_circuit.append(sub_circuit.to_gate().control(num_ctrl_qubits = 1, ctrl_state = '1'), list(range(2 * ctrl_size, 2 * ctrl_size + 1 + numq)))
-        
-            diff_next = next(j for j in range(ctrl_size) if cval_next[j] != control_values[j])
-            ## Apply right encodings from diff_next to the end
-            if diff_next != ctrl_size - 1:
-                for j in range(ctrl_size - 1, diff_next, -1):
-                    apply_right_enc(j)
-                    mccount += 1
-                    tcount += t_counts_per_ccx
-                    cxcount += cx_counts_per_ccx
-            ## Apply a CX to flip the differed bit
-            if diff_next != 0:
-                opt_circuit.cx(anc_regs[diff_next - 1], anc_regs[diff_next])
-                cxcount += 1
-            else:
-                opt_circuit.cx(0, anc_regs[0])
-    return opt_circuit, tcount, mccount, cxcount
 if __name__ == "__main__":
     
     H = [('ZZI', -1), ('IZZ', -1), ('ZIZ', -1),('XII', -1), ('IXI', -1), ('IIX', -1)]

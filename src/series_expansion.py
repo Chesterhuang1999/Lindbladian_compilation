@@ -271,7 +271,7 @@ def simulate_circuit_statevec(qc: QuantumCircuit, ini_state, sel_state, reg_size
     
     sel_size, ctrl_size, sys_size = reg_sizes
     qc_sim = QuantumCircuit(qc.num_qubits)
-    state_ctrl = Statevector.from_label('0' * ctrl_size)
+    state_ctrl = Statevector.from_label('0' * ctrl_size) if ctrl_size > 0 else Statevector([1.0])
     if isinstance(ini_state, str):
         state_sys_ctrl = Statevector.from_label(ini_state + '0' * ctrl_size)
     elif isinstance(ini_state, Statevector):
@@ -430,7 +430,7 @@ def simulate_circuit_statevec_optimized(qc: QuantumCircuit, ini_state, sel_state
 
     qc_sim = QuantumCircuit(qc.num_qubits)
 
-    state_ctrl = Statevector.from_label('0' * ctrl_size)
+    state_ctrl = Statevector.from_label('0' * ctrl_size) if ctrl_size > 0 else Statevector([1.0])
     state_sel_anc = Statevector.from_label('0' * sel_anc_size) if sel_anc_size > 0 else Statevector([1.0])
     state_sel = Statevector(sel_state)
     state_top = Statevector.from_label('1')
@@ -446,8 +446,9 @@ def simulate_circuit_statevec_optimized(qc: QuantumCircuit, ini_state, sel_state
     state_tot = state_sys.tensor(state_ctrl).tensor(state_sel_anc).tensor(state_sel).tensor(state_top)
 
     qc_sim.initialize(state_tot)
-    qc_sim = transpile(qc_sim, simulator, optimization_level=2)
+    
     qc_sim.compose(qc, qc_sim.qubits, inplace=True)
+    qc_sim = transpile(qc_sim, simulator, optimization_level=2)
     qc_sim.save_statevector(label='final_state')  # type: ignore
 
     result = simulator.run(qc_sim, shots=1).result()
