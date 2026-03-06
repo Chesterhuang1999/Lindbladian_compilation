@@ -17,7 +17,8 @@ import itertools
 #### Construct the Lindbladian evolution circuit via higher-order series expansion
 def create_single_kraus(
         k: int, index: list, L_list: list, K1: int,
-        t: float, q: int, ctrl_size: int, sys_size:int, eff_H: Matrixsum
+        t: float, q: int, ctrl_size: int, sys_size:int, eff_H: Matrixsum,
+        opt = 'No'
         ):
     """ 
     Create the LCU encoding circuit by 
@@ -75,7 +76,7 @@ def create_single_kraus(
             delta_t = points[k - j - 1] - points[k - j] 
 
         ### Concatenate the block-encoding for coherent term e^{J delta_t} = sum_l=0^K1 (J^l t^l/(l!)) 
-        qc_C, coeff_C = construct_circuit_coherent(eff_H, K1, delta_t)
+        qc_C, coeff_C = construct_circuit_coherent(eff_H, K1, delta_t, opt = opt)
         qc_elem.compose(qc_C, qubits = qc_elem.qubits[ctrl_offset: ctrl_offset + ctrl_reg_size[2 * j]] 
                         + qc_elem.qubits[total_ctrl_size:], inplace = True)
         ctrl_offset += ctrl_reg_size[2 * j]
@@ -94,7 +95,7 @@ def create_single_kraus(
 
 
 
-def construct_circuit_coherent(J: Matrixsum, K1: int, t: float):
+def construct_circuit_coherent(J: Matrixsum, K1: int, t: float, opt = 'No'):
     # J.mul_coeffs(-1j)
     
     sum_of_J = J.identity(J.size)
@@ -110,7 +111,7 @@ def construct_circuit_coherent(J: Matrixsum, K1: int, t: float):
             sum_of_J = sum_of_J.add(product_J)
 
     # qc_J = block_encoding_matrixsum(sum_of_J)
-    qc_J = BlockEncoding(sum_of_J).circuit(opt = 'No')
+    qc_J = BlockEncoding(sum_of_J).circuit(opt = opt)
     
     succ_prob = sum_of_J.pauli_norm()
     
@@ -118,7 +119,7 @@ def construct_circuit_coherent(J: Matrixsum, K1: int, t: float):
 
 
 # def higher_order_Lind_expansion(Lind: Lindbladian, K: int, q: int, t: float, ini_state, K1: int):
-def higher_order_Lind_expansion(Lind: Lindbladian, K: int, q: int, t: float, K1: int):
+def higher_order_Lind_expansion(Lind: Lindbladian, K: int, q: int, t: float, K1: int, opt = 'No'):
     """
     Create the higher-order Lindblad evolution expansion circuit
     using Kth order series expansion with q quadrature points.
@@ -137,7 +138,7 @@ def higher_order_Lind_expansion(Lind: Lindbladian, K: int, q: int, t: float, K1:
     kraus_count = 1
 
     ### Construct the circuit for A_0 = e^{Jt}
-    qc_info = construct_circuit_coherent(effective_H, K1, t)
+    qc_info = construct_circuit_coherent(effective_H, K1, t, opt = opt)
     qc_coh_ctrl_size = qc_info[0].num_qubits - sys_size
     coeff_sum_total.append(qc_info[1])
     ctrl_size_max = max(ctrl_size_max, qc_coh_ctrl_size)
@@ -152,7 +153,7 @@ def higher_order_Lind_expansion(Lind: Lindbladian, K: int, q: int, t: float, K1:
             kraus_count += 1
             assert index[0] == k and len(index) == 2 * k + 1
             qc_elem, coeff_sum_index, elem_ctrl_size = create_single_kraus(k, index, Lind.L_list, K1, t, q,
-                                                    qc_coh_ctrl_size, sys_size, effective_H)
+                                                    qc_coh_ctrl_size, sys_size, effective_H, opt = opt)
             ctrl_size_max = max(elem_ctrl_size, ctrl_size_max)
             qc_ensemble.append(qc_elem)
             coeff_sum_total.append(coeff_sum_index)
@@ -174,9 +175,9 @@ def higher_order_Lind_expansion(Lind: Lindbladian, K: int, q: int, t: float, K1:
     
     return qc_info, sel_state, reg_sizes, qc_coh_ctrl_size, qc_ensemble, kraus_count, ctrl_sizes, coeff_sum_square
 
-def construct_higher_order_circuit(Lind, K, q, t, K1, structure = 'basic'):
+def construct_higher_order_circuit(Lind, K, q, t, K1, opt, structure = 'basic'):
 
-    qc_info, sel_state, reg_sizes, qc_coh_ctrl_size, qc_ensemble, kraus_count, ctrl_sizes, coeff_sum_square = higher_order_Lind_expansion(Lind, K, q, t, K1)
+    qc_info, sel_state, reg_sizes, qc_coh_ctrl_size, qc_ensemble, kraus_count, ctrl_sizes, coeff_sum_square = higher_order_Lind_expansion(Lind, K, q, t, K1, opt = opt)
     sel_size, ctrl_size_max, sys_size = reg_sizes
     
     select_reg = QuantumRegister(sel_size, 'sel')
