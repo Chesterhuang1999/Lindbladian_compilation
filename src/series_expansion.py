@@ -95,7 +95,8 @@ def create_single_kraus(
 
 
 def construct_circuit_coherent(J: Matrixsum, K1: int, t: float):
-    J.mul_coeffs(-1j)
+    # J.mul_coeffs(-1j)
+    
     sum_of_J = J.identity(J.size)
     for order in range(1, K1 + 1):
         if order == 1: 
@@ -110,7 +111,9 @@ def construct_circuit_coherent(J: Matrixsum, K1: int, t: float):
 
     # qc_J = block_encoding_matrixsum(sum_of_J)
     qc_J = BlockEncoding(sum_of_J).circuit(opt = 'No')
+    
     succ_prob = sum_of_J.pauli_norm()
+    
     return qc_J, succ_prob
 
 
@@ -123,6 +126,7 @@ def higher_order_Lind_expansion(Lind: Lindbladian, K: int, q: int, t: float, K1:
     ### Zeroth order term: e^Jt
     ### Here we just compute H_eff, and J = -iH_eff is incorporated into LCU construction
     effective_H = Lind.effective_H()
+    # print(effective_H)
     m = len(Lind.L_list)
     sys_size = effective_H.size
     sum_of_kraus = 0
@@ -159,7 +163,6 @@ def higher_order_Lind_expansion(Lind: Lindbladian, K: int, q: int, t: float, K1:
     sel_size = int(np.ceil(np.log2(kraus_count))) 
     reg_sizes = [sel_size, ctrl_size_max, sys_size]
  
-
     ## Prepare superposition over selection register
     coeff_sum_square = sum([abs(c)**2 for c in coeff_sum_total])
     norm_coeffs = [abs(c)**2 / coeff_sum_square for c in coeff_sum_total]

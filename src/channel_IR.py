@@ -258,6 +258,9 @@ class Lindbladian:
             L_dag_L = matsum_mul(L_dag, L)
             L_dag_L.mul_coeffs(-0.5j)
             H_eff = H_eff.add(L_dag_L)
+
+        H_eff.mul_coeffs(-1j)
+        H_eff.simplify()
         return H_eff
     def __size__(self):
         if self.H.size > 0:
