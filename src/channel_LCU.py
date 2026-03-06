@@ -251,7 +251,7 @@ def channel_to_LCU (ensem: channel_ensemble, structure = 'basic', opt = 'No') ->
             circuits.append(qc_be_ms)
         qc, tcount, mccount, cxcount = mulplex_U_opt(qc, circuits, select_size, ctrl_size , sys_size)
         qubit_indexes = [select_indexes, anc_indexes, ctrl_indexes, sys_indexes]
-    qc.save_statevector('final_state') #type: ignore
+    # qc.save_statevector('final_state') #type: ignore
     # qubit_regs = [ctrl, select, sys]
     return [qc, qubit_indexes]
 
@@ -497,6 +497,7 @@ def simulate_circuit(circuit: QuantumCircuit, ini_state: Statevector, qubit_regs
     
     ## Distinguish the type of registers using length of qubit_regs
     qc_test = transpile(qc_test, simulator, optimization_level=1)
+    qc_test.save_statevector(label = 'final_state')
     ## Extract system density for comparison
     result_job = simulator.run(qc_test, shots = 1, initial_state=ini_state).result().data(0)
     print('Simulation done, extracting final state...   ')
