@@ -109,9 +109,12 @@ def construct_circuit_coherent(J: Matrixsum, K1: int, t: float, opt = 'No'):
             product_J = matsum_mul(product_J, J)
             product_J.mul_coeffs(t / order)
             sum_of_J = sum_of_J.add(product_J)
-
+        
     # qc_J = block_encoding_matrixsum(sum_of_J)
-    qc_J = BlockEncoding(sum_of_J).circuit(opt = opt)
+    
+    be_J = BlockEncoding(sum_of_J)
+    qc_J = be_J.circuit(opt = opt)
+
     
     succ_prob = sum_of_J.pauli_norm()
     
@@ -127,7 +130,7 @@ def higher_order_Lind_expansion(Lind: Lindbladian, K: int, q: int, t: float, K1:
     ### Zeroth order term: e^Jt
     ### Here we just compute H_eff, and J = -iH_eff is incorporated into LCU construction
     effective_H = Lind.effective_H()
-    # print(effective_H)
+    
     m = len(Lind.L_list)
     sys_size = effective_H.size
     sum_of_kraus = 0
@@ -252,22 +255,53 @@ def projection_op_dm(dm: DensityMatrix, reg_sizes: list):
 def projection_vec(sv: Statevector, dim: int, anc_size: int, ctrls: list):
     sel_size = anc_size - len(ctrls)
     
-    proj_0 = Operator.from_label('0' * len(ctrls))
-    if sel_size == 0:
-        iden = Operator.from_label('I' * (dim - anc_size))
-        proj_full = iden.tensor(proj_0)
-        projected_vec = np.dot(proj_full, sv)
-        projected_vec = projected_vec[::2**anc_size]
-        return Statevector(zero_small_complex(projected_vec, tol = 1e-6))
-    else:
-        iden_sel = Operator.from_label('I' * (sel_size))
-        iden_sys = Operator.from_label('I' * (dim - anc_size))
-        proj_full = iden_sys.tensor(proj_0).tensor(iden_sel) 
-        projected_vec = np.dot(proj_full, sv)
-        projected_dm_sys = partial_trace(DensityMatrix(projected_vec), list(range(anc_size)))
-        # projected_dm_sys = partial_trace(DensityMatrix(projected_vec), list(range(sel_size, anc_size)))
-        return DensityMatrix(zero_small_complex(np.asarray(projected_dm_sys), tol = 1e-6))
+    # proj_0 = Operator.from_label('0' * len(ctrls))
+    # if sel_size == 0:
+    #     iden = Operator.from_label('I' * (dim - anc_size))
+    #     proj_full = iden.tensor(proj_0)
+    #     projected_vec = np.dot(proj_full, sv)
+    #     projected_vec = projected_vec[::2**anc_size]
+    #     return Statevector(zero_small_complex(projected_vec, tol = 1e-6))
+    # else:
+    #     iden_sel = Operator.from_label('I' * (sel_size))
+    #     iden_sys = Operator.from_label('I' * (dim - anc_size))
+    #     proj_full = iden_sys.tensor(proj_0).tensor(iden_sel) 
+    #     projected_vec = np.dot(proj_full, sv)
+    #     projected_dm_sys = partial_trace(DensityMatrix(projected_vec), list(range(anc_size)))
+    #     # projected_dm_sys = partial_trace(DensityMatrix(projected_vec), list(range(sel_size, anc_size)))
+    #     return DensityMatrix(zero_small_complex(np.asarray(projected_dm_sys), tol = 1e-6))
+    ctrl_size = len(ctrls)
+    sys_size = dim - anc_size
 
+    dim_sys = 1 << sys_size
+    dim_sel = 1 << sel_size
+
+    # state ordering consistent with existing construction:
+    # state_tot = state_sys_ctrl.tensor(state_sel)
+    # and state_sys_ctrl = state_sys.tensor(state_ctrl)
+    # => basis index: ((sys << ctrl_size) + ctrl) << sel_size + sel
+    data = np.asarray(sv.data if hasattr(sv, "data") else sv, dtype=complex).reshape(-1)
+
+    if sel_size == 0:
+        # keep only ctrl = 0...0 entries, output Statevector on system
+        out = np.zeros(dim_sys, dtype=complex)
+        for s in range(dim_sys):
+            flat_idx = s << ctrl_size  # ctrl bits fixed to 0
+            out[s] = data[flat_idx]
+        return Statevector(zero_small_complex(out, tol=1e-8))
+
+    # sel_size > 0:
+    # build amplitude matrix A[s, a] = <s, ctrl=0, a | psi>
+    A = np.zeros((dim_sys, dim_sel), dtype=complex)
+    shift = ctrl_size + sel_size
+    for s in range(dim_sys):
+        base = s << shift
+        # ctrl fixed to 0 => middle bits are 0, sel occupies lowest bits
+        A[s, :] = data[base: base + dim_sel]
+
+    # rho_sys[s, t] = sum_a A[s,a] * conj(A[t,a])  (trace out select)
+    rho_sys = np.einsum('sa,ta->st', A, np.conjugate(A))
+    return DensityMatrix(zero_small_complex(rho_sys, tol=1e-8))
 
 def simulate_circuit_statevec(qc: QuantumCircuit, ini_state, sel_state, reg_sizes: list):
 
@@ -280,21 +314,21 @@ def simulate_circuit_statevec(qc: QuantumCircuit, ini_state, sel_state, reg_size
         state_sys_ctrl = Statevector.from_label(ini_state + '0' * ctrl_size)
     elif isinstance(ini_state, Statevector):
         state_sys_ctrl = ini_state.tensor(state_ctrl)
-    
-    
+        
     state_tot = state_sys_ctrl.tensor(Statevector(sel_state))
     
-    qc_sim.initialize(state_tot)
-    qc_sim = transpile(qc_sim, simulator, optimization_level=2)
+    qc_sim.append(StatePreparation(state_tot), qc_sim.qubits)
+    
     qc_sim.compose(qc, qc_sim.qubits, inplace=True)
+
+    qc_sim = transpile(qc_sim,  simulator, optimization_level=2)
+    # print(qc_sim.count_ops())
     qc_sim.save_statevector(label = 'final_state') #type: ignore
     # qc_sim = transpile(qc_sim, simulator, optimization_level=2)
-
     ### Sim task I: Get final statevector
-    
     result = simulator.run(qc_sim, shots = 1).result()
     final_state = result.data()['final_state']
-    
+
     final_state_sys = projection_vec(final_state, sel_size + ctrl_size + sys_size, sel_size + ctrl_size, list(range(sel_size, sel_size + ctrl_size)))
     return final_state_sys
     # return final_dm
@@ -377,22 +411,7 @@ def construct_qobj_lind(Lind: Lindbladian, dim_sys: int):
    
     return H_qobj, L_qobj_list
 
-    def simulate_circuit_repeat_legacy(qc: QuantumCircuit, ini_state: DensityMatrix, sel_state, coeff_sum: float, reg_sizes: list, repeat: int):
-        """
-        Legacy version: repeatedly applies simulate_circuit_dm.
-        """
-        current_state = ini_state
-        for j in range(repeat):
-            if j == 0:
-                final_dm_sys = simulate_circuit_dm(qc, ini_state, sel_state, reg_sizes)
-                current_state = coeff_sum * final_dm_sys
-                current_state = current_state / np.trace(current_state)
-            else:
-                final_dm_sys = simulate_circuit_dm(qc, current_state, sel_state, reg_sizes)
-                current_state = coeff_sum * final_dm_sys
-                current_state = current_state / np.trace(current_state)
-
-        return current_state
+    
 # ...existing code...
 def projection_op_dm_optimized(dm: DensityMatrix, reg_sizes_opt: list):
     """

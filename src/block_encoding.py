@@ -446,17 +446,20 @@ def build_vec_phase_lookup(matrix, phases):
     vec_phase_lookup = {}
     for idx in range(matrix.shape[0]):
         vec = np.asarray(matrix[idx], dtype=int)
-        vec_phase_lookup[vec.tobytes()] = int(phases[idx]) % 4
+        vec_phase_lookup[vec.tobytes()] = phases[idx] % 4
+        
     return vec_phase_lookup
 
-def extract_basis_modes_with_phases(additional_modes, vec_phase_lookup):
+def extract_basis_modes_with_phases(additional_modes, vec_phase_lookup, zero_phase):
     basis_modes = []
     nonbasis_modes = []
     for mode in additional_modes:
         pauli_label, ctrl_value = mode[0], mode[1]
         pauli = Pauli(pauli_label)
         vec = np.hstack((pauli.x.astype(int), pauli.z.astype(int)))
-        phase = int(vec_phase_lookup.get(vec.tobytes(), 0))
+        phase = vec_phase_lookup.get(vec.tobytes(), 0)
+        if pauli_label == 'I' * len(pauli_label):
+            phase = zero_phase
         mode_with_phase = (pauli_label, ctrl_value, phase)
         if ctrl_value.count('1') == 1:
             basis_modes.append(mode_with_phase)
@@ -464,6 +467,7 @@ def extract_basis_modes_with_phases(additional_modes, vec_phase_lookup):
             nonbasis_modes.append(mode_with_phase)
     basis_modes.sort(key=lambda x: int(x[1], 2))
     nonbasis_modes.sort(key=lambda x: int(x[1], 2))
+
     return basis_modes, nonbasis_modes
 
 def mobius_invert_modes_with_phases_legacy(w, additional_modes, vec_phase_lookup):
@@ -475,9 +479,9 @@ def mobius_invert_modes_with_phases_legacy(w, additional_modes, vec_phase_lookup
         return pauli
     if len(additional_modes) == 0:
         return {
-            "p_phase_table": np.zeros(2 ** w, dtype=int),
-            "g_phase_table": np.zeros(2 ** w, dtype=int),
-            "phi_ad_table": np.zeros(2 ** w, dtype=int),
+            "p_phase_table": np.zeros(2 ** w, dtype=float),
+            "g_phase_table": np.zeros(2 ** w, dtype=float),
+            "phi_ad_table": np.zeros(2 ** w, dtype=float),
             "basis_modes_with_phase": [],
             "nonbasis_modes_with_phase": [],
             "g_modes_with_phase": [],
@@ -489,7 +493,7 @@ def mobius_invert_modes_with_phases_legacy(w, additional_modes, vec_phase_lookup
     table_size = 2 ** w
 
     p_vec_table = np.zeros((table_size, vec_len), dtype=int)
-    p_phase_table = np.zeros(table_size, dtype=int)
+    p_phase_table = np.zeros(table_size, dtype=float)
     relevant_addr_mask = np.zeros(table_size, dtype=bool)
 
     for mode in additional_modes:
@@ -501,12 +505,12 @@ def mobius_invert_modes_with_phases_legacy(w, additional_modes, vec_phase_lookup
         if vec_key in vec_phase_lookup:
             ## Relevant entry (belongs to the target U set): keep as hard P-table constraint.
             p_vec_table[idx] = vec
-            p_phase_table[idx] = int(vec_phase_lookup[vec_key])
+            p_phase_table[idx] = vec_phase_lookup[vec_key]
             relevant_addr_mask[idx] = True
         else:
             ## Filler entry: unconstrained in P table; leave as identity/zero phase.
             p_vec_table[idx] = np.zeros(vec_len, dtype=int)
-            p_phase_table[idx] = 0
+            p_phase_table[idx] = 0.0
     g_vec_table = p_vec_table.copy()
     g_phase_table = p_phase_table.copy()
     for i in range(w):
@@ -525,14 +529,14 @@ def mobius_invert_modes_with_phases_legacy(w, additional_modes, vec_phase_lookup
     for idx in range(table_size):
         if not relevant_addr_mask[idx]:
             g_vec_table[idx] = np.zeros(vec_len, dtype=int)
-            g_phase_table[idx] = 0
+            g_phase_table[idx] = 0.0
 
     ## Reconstruct phase(P_b) from G_s by explicit Pauli multiplication order,
     ## so non-commuting overlaps contribute extra phase consistently.
-    phase_from_g = np.zeros(table_size, dtype=int)
+    phase_from_g = np.zeros(table_size, dtype=float)
     for b in range(table_size):
         accum_vec = np.zeros(vec_len, dtype=int)
-        accum_phase = 0
+        accum_phase = 0.0
         for s in range(table_size):
             if (s & b) != s:
                 continue
@@ -541,7 +545,7 @@ def mobius_invert_modes_with_phases_legacy(w, additional_modes, vec_phase_lookup
             pauli_accum = vec_to_pauli(accum_vec)
             pauli_s = vec_to_pauli(g_vec_table[s])
             overlap_phase = int((pauli_s @ pauli_accum).phase) 
-            accum_phase = (accum_phase + int(g_phase_table[s]) + int(overlap_phase)) % 4
+            accum_phase = (accum_phase + g_phase_table[s] + int(overlap_phase)) % 4
             accum_vec = accum_vec ^ g_vec_table[s]
         phase_from_g[b] = accum_phase
 
@@ -560,7 +564,7 @@ def mobius_invert_modes_with_phases_legacy(w, additional_modes, vec_phase_lookup
         z = vec[n:]
         pauli_label = Pauli((z, x)).to_label()
         ctrl_value = bin(idx)[2:].zfill(w)
-        g_modes_with_phase.append((pauli_label, ctrl_value, int(g_phase_table[idx]) % 4))
+        g_modes_with_phase.append((pauli_label, ctrl_value, g_phase_table[idx] % 4))
 
     return {
         "p_phase_table": p_phase_table,
@@ -573,7 +577,7 @@ def mobius_invert_modes_with_phases_legacy(w, additional_modes, vec_phase_lookup
     }
 
 
-def mobius_invert_modes_with_phases_bottom_up(w, additional_modes, vec_phase_lookup):
+def mobius_invert_modes_with_phases_bottom_up(w, additional_modes, vec_phase_lookup, zero_phase):
     def vec_to_pauli(vec):
         n = len(vec) // 2
         x = vec[:n]
@@ -582,9 +586,9 @@ def mobius_invert_modes_with_phases_bottom_up(w, additional_modes, vec_phase_loo
 
     if len(additional_modes) == 0:
         return {
-            "p_phase_table": np.zeros(2 ** w, dtype=int),
-            "g_phase_table": np.zeros(2 ** w, dtype=int),
-            "phi_ad_table": np.zeros(2 ** w, dtype=int),
+            "p_phase_table": np.zeros(2 ** w, dtype=float),
+            "g_phase_table": np.zeros(2 ** w, dtype=float),
+            "phi_ad_table": np.zeros(2 ** w, dtype=float),
             "basis_modes_with_phase": [],
             "nonbasis_modes_with_phase": [],
             "g_modes_with_phase": [],
@@ -596,7 +600,7 @@ def mobius_invert_modes_with_phases_bottom_up(w, additional_modes, vec_phase_loo
     table_size = 2 ** w
 
     p_vec_table = np.zeros((table_size, vec_len), dtype=int)
-    p_phase_table = np.zeros(table_size, dtype=int)
+    p_phase_table = np.zeros(table_size, dtype=float)
     relevant_addr_mask = np.zeros(table_size, dtype=bool)
 
     for mode in additional_modes:
@@ -607,12 +611,17 @@ def mobius_invert_modes_with_phases_bottom_up(w, additional_modes, vec_phase_loo
         vec_key = vec.tobytes()
         if vec_key in vec_phase_lookup:
             p_vec_table[idx] = vec
-            p_phase_table[idx] = int(vec_phase_lookup[vec_key]) % 4
+            p_phase_table[idx] = vec_phase_lookup[vec_key] % 4
+            relevant_addr_mask[idx] = True
+        elif vec_key == (np.zeros(vec_len, dtype=int)).tobytes() and zero_phase != 0.0:
+            p_vec_table[idx] = np.zeros(vec_len, dtype=int)
+            p_phase_table[idx] = zero_phase % 4
             relevant_addr_mask[idx] = True
         else:
             p_vec_table[idx] = np.zeros(vec_len, dtype=int)
             p_phase_table[idx] = 0
-
+    if zero_phase != 0.0:
+        p_phase_table[0] = zero_phase % 4
     g_vec_table = np.zeros_like(p_vec_table)
     g_phase_table = np.zeros_like(p_phase_table)
 
@@ -621,67 +630,73 @@ def mobius_invert_modes_with_phases_bottom_up(w, additional_modes, vec_phase_loo
             continue
 
         wt = int(bin(b).count("1"))
-        if wt <= 1:
+        if wt == 1:
             g_vec_table[b] = p_vec_table[b].copy()
-            g_phase_table[b] = int(p_phase_table[b]) % 4
+            if zero_phase != 0.0:
+                g_phase_table[b] = (p_phase_table[b] - zero_phase) % 4
+            else: 
+                g_phase_table[b] = p_phase_table[b] % 4
             continue
 
         curr_vec = p_vec_table[b].copy()
-        curr_phase = int(p_phase_table[b]) % 4
+        curr_phase = p_phase_table[b] % 4
 
-        for c in range(1, b):
+        # for c in range(1, b):
+        for c in range(b):
             if (c & b) != c:
                 continue
             if not relevant_addr_mask[c]:
                 continue
-            if not np.any(g_vec_table[c]) and int(g_phase_table[c]) % 4 == 0:
+            if not np.any(g_vec_table[c]) and g_phase_table[c] % 4 == 0.0:
                 continue
 
             pauli_curr = vec_to_pauli(curr_vec)
             pauli_basis = vec_to_pauli(g_vec_table[c])
-            overlap_phase = int( 4 - (pauli_curr @ pauli_basis).phase) % 4
+            overlap_phase = 4 - (pauli_curr @ pauli_basis).phase % 4 if (pauli_curr @ pauli_basis).phase != 0 else 0
 
             curr_vec = curr_vec ^ g_vec_table[c]
-            curr_phase = (curr_phase - int(g_phase_table[c]) + overlap_phase) % 4
+            curr_phase = (curr_phase - g_phase_table[c] + overlap_phase) % 4
 
         g_vec_table[b] = curr_vec
         g_phase_table[b] = curr_phase
 
-    phase_from_g = np.zeros(table_size, dtype=int)
-    for b in range(table_size):
+    phase_from_g = np.zeros(table_size, dtype=float)
+    phase_from_g[0] = g_phase_table[0]
+    for b in range(1, table_size):
         accum_vec = np.zeros(vec_len, dtype=int)
         accum_phase = 0
         for s in range(table_size):
             if (s & b) != s:
                 continue
-            if not np.any(g_vec_table[s]) and int(g_phase_table[s]) % 4 == 0:
+            if not np.any(g_vec_table[s]) and g_phase_table[s] % 4 == 0.0:
                 continue
             pauli_accum = vec_to_pauli(accum_vec)
             pauli_s = vec_to_pauli(g_vec_table[s])
-            overlap_phase = int( 4 - (pauli_s @ pauli_accum).phase) % 4
-            accum_phase = (accum_phase + int(g_phase_table[s]) + int(overlap_phase)) % 4
+            overlap_phase = 4 - (pauli_s @ pauli_accum).phase % 4 if (pauli_s @ pauli_accum).phase != 0 else 0
+            accum_phase = (accum_phase + g_phase_table[s] + int(overlap_phase)) % 4
             accum_vec = accum_vec ^ g_vec_table[s]
         phase_from_g[b] = accum_phase
 
     phi_ad_table = (p_phase_table - phase_from_g) % 4
     additional_indices = {int(mode[1], 2) for mode in additional_modes}
     for idx in additional_indices:
-        g_phase_table[idx] = (int(g_phase_table[idx]) + int(phi_ad_table[idx])) % 4
+        g_phase_table[idx] = g_phase_table[idx] + phi_ad_table[idx] % 4
 
-    basis_modes_with_phase, nonbasis_modes_with_phase = extract_basis_modes_with_phases(additional_modes, vec_phase_lookup)
+    basis_modes_with_phase, nonbasis_modes_with_phase = extract_basis_modes_with_phases(additional_modes, vec_phase_lookup, zero_phase)
 
     g_modes_with_phase = []
     for idx in range(table_size):
         vec = g_vec_table[idx]
         has_nontrivial_vec = np.any(vec)
-        has_nontrivial_phase = (int(g_phase_table[idx]) % 4) != 0
+        has_nontrivial_phase = (g_phase_table[idx]) % 4 != 0
         if not has_nontrivial_vec and not has_nontrivial_phase:
             continue
         x = vec[:n]
         z = vec[n:]
         pauli_label = Pauli((z, x)).to_label()
         ctrl_value = bin(idx)[2:].zfill(w)
-        g_modes_with_phase.append((pauli_label, ctrl_value, int(g_phase_table[idx]) % 4))
+        g_phase_value = g_phase_table[idx] % 4 if g_phase_table[idx] < 2.0 else g_phase_table[idx] % 4 - 4
+        g_modes_with_phase.append((pauli_label, ctrl_value, g_phase_value))
 
     return {
         "p_phase_table": p_phase_table,
@@ -694,10 +709,10 @@ def mobius_invert_modes_with_phases_bottom_up(w, additional_modes, vec_phase_loo
     }
 
 
-def mobius_invert_modes_with_phases(w, additional_modes, vec_phase_lookup, method="bottom-up"):
+def mobius_invert_modes_with_phases(w, additional_modes, vec_phase_lookup, zero_phase, method="bottom-up"):
     if method == "legacy":
         return mobius_invert_modes_with_phases_legacy(w, additional_modes, vec_phase_lookup)
-    return mobius_invert_modes_with_phases_bottom_up(w, additional_modes, vec_phase_lookup)
+    return mobius_invert_modes_with_phases_bottom_up(w, additional_modes, vec_phase_lookup, zero_phase)
 
 class BlockEncoding:
     """
@@ -891,17 +906,20 @@ class BlockEncoding:
     def find_optimal_order_matrices(self):
         pauli_list = []
         phase_list = []
+        zero_phase = 0.0
         for i, ms in enumerate(self.mat_list):    
             if isinstance(ms, tuple) or isinstance(ms, list):
                 pauli_op, coeff = ms
-               
                 if pauli_op != 'I' * len(pauli_op): #type: ignore
                     pauli_list.append(pauli_op) #type: ignore
                     phase_list.append(coeff)
+                else:
+                    zero_phase = 2 * np.angle(coeff) / np.pi
         pauli_list = PauliList(pauli_list)
         x_part, z_part = pauli_list.x, pauli_list.z
         symplectic_matrix = np.hstack((x_part, z_part)).astype(int)
-        phase_array = np.array([int(2 * np.angle(phase) / np.pi) for phase in phase_list])
+        phase_array = np.array([2 * np.angle(phase) / np.pi for phase in phase_list])
+
         sorted_matrix_z, phases_z = sort_symplectic_matrix(symplectic_matrix, phase_array, crit = 'z')
         sorted_matrix_x, phases_x = sort_symplectic_matrix(symplectic_matrix, phase_array, crit = 'x')
 
@@ -988,15 +1006,15 @@ class BlockEncoding:
         
         self.coeff_mode_dict = coeff_mode_dict
         self.vec_phase_lookup = build_vec_phase_lookup(chosen_matrix, chosen_phases)
-        self.basis_modes_with_phase, self.nonbasis_modes_with_phase = extract_basis_modes_with_phases(additional_modes, self.vec_phase_lookup)
-        self.mobius_phase_result = mobius_invert_modes_with_phases(w, additional_modes, self.vec_phase_lookup)
+        self.basis_modes_with_phase, self.nonbasis_modes_with_phase = extract_basis_modes_with_phases(additional_modes, self.vec_phase_lookup, zero_phase)
+        
+        self.mobius_phase_result = mobius_invert_modes_with_phases(w, additional_modes, self.vec_phase_lookup, zero_phase)
         
         return coeff_mode_dict, w
     def mulplex_U_opt_order(self):
         sys_size = self.sys_size
         coeff_mode_dict, ctrl_size = self.find_optimal_order_matrices()
         modes_with_phase = self.mobius_phase_result['g_modes_with_phase']
-        
         ctrl_reg, sys_reg = QuantumRegister(ctrl_size, 'ctrl'), QuantumRegister(sys_size, 'sys')
         qc_u = QuantumCircuit(ctrl_reg, sys_reg)
         mccount = 0
@@ -1019,7 +1037,7 @@ class BlockEncoding:
             ## rightmost bit in ctrl_value corresponds to lower-index control qubit.
             active_ctrls = [i for i, bit in enumerate(ctrl_value[::-1]) if bit == '1']
             if len(active_ctrls) == 0:
-                qc_u.append(qc_pauli.to_gate(), list(range(ctrl_size, ctrl_size + sys_size)))
+                qc_u.append(qc_pauli.to_gate(), list(range(ctrl_size, ctrl_size + sys_size))) 
             else:
                 ctrl_U_elem = qc_pauli.to_gate().control(num_ctrl_qubits = len(active_ctrls), ctrl_state = '1' * len(active_ctrls))
                 qargs = active_ctrls + list(range(ctrl_size, ctrl_size + sys_size))
@@ -1192,7 +1210,6 @@ class BlockEncoding:
         
         if opt == 'No':
             qc_u, tcount, mccount, cxcount = self.mulplex_U(self.mat_list, self.ctrl_size, self.sys_size)
-            
             ctrl = QuantumRegister(self.ctrl_size, 'ctrl')
             sys = QuantumRegister(self.sys_size, 'sys')
             qc = QuantumCircuit(ctrl, sys)

@@ -5,7 +5,8 @@ from collections import defaultdict
 from copy import deepcopy
 class OperatorAtom(ABC):
     def __init__(self, phase: complex = 1.0):
-        self.phase = phase
+        self.phase = round(phase.real, 15) + 1j * round(phase.imag, 15)
+        # self.phase = phase
     
     @abstractmethod 
     def bare_op(self):
@@ -209,7 +210,7 @@ def list2matsum(ops: list) -> Matrixsum:
             instances.append((PauliAtom(mat, phase = coeff / abs(coeff)), abs(coeff)))
         elif isinstance(mat, np.ndarray):
             instances.append((MatrixAtom(mat, phase = coeff / abs(coeff)), abs(coeff)))
-    return Matrixsum(instances)
+    return Matrixsum(instances).simplify()
 
 class Lindbladian:
     def __init__(self, H, L_list: list):
@@ -225,7 +226,7 @@ class Lindbladian:
     def input2matsum(self, ops):
         if isinstance(ops, np.ndarray):
             H_pl = SparsePauliOp.from_operator(Operator(ops))
-            H_pl = H_pl.simplify(atol=1e-8)
+            H_pl = H_pl.simplify(atol=1e-10)
             new_instances = [(PauliAtom(p.to_label(), phase = c/abs(c)), abs(c)) for p, c in zip(H_pl.paulis, H_pl.coeffs)] #type: ignore
         elif isinstance(ops, list):
             new_instances = []
