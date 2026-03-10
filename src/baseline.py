@@ -42,7 +42,7 @@ def simulate_lindblad(H: Qobj, L_list: list, psi_0: Qobj, duration: float = 1.0,
     else:
         final_state_qobj = result.states[-1].data_as("ndarray")
     
-    return approx_state(final_state_qobj, tol = 1e-8, rnd = 6)
+    return approx_state(final_state_qobj, tol = 1e-30, rnd = 30)
 
 if __name__ == "__main__":
     H = [('ZZI', -1), ('IZZ', -1), ('ZIZ', -1),('XII', -1), ('IXI', -1), ('IIX', -1)]

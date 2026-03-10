@@ -1,6 +1,6 @@
 from series_expansion import *
 from channel_IR import Lindbladian
-
+from qiskit.quantum_info import random_statevector
 from channel_IR import *
 from qutip import qeye, sigmax, sigmaz, sigmam, tensor
 # ===== Test III.2 extension: TFIM + decay model (follow Cell 13 simulation pipeline) =====
@@ -87,7 +87,16 @@ L_list = [[('X', np.sqrt((v + 1))/scaling), ('Y', 1j * np.sqrt((v + 1))/scaling)
 decay_lind = Lindbladian(H, L_list)
 # H_qobj, L_qobj_list = build_tfim_decay_qutip_reference(n_qubits, Delta, J, gamma)
 TFIM_lind = Lindbladian(H_terms, L_terms)
-H_eff = decay_lind.effective_H()
+H_eff = TFIM_lind.effective_H()
+
+rng_init = np.random.default_rng(1)
+ini_state = random_statevector(2 ** n_qubits, seed=rng_init).data
+perturbation = 1e-15
+data_with_perturbation = ini_state + perturbation * np.ones(ini_state.shape)
+
+ini_state_perb = Statevector(data_with_perturbation)
+
+print(np.linalg.norm(DensityMatrix(ini_state) - DensityMatrix(ini_state_perb), ord = 'nuc') / 2)
 
 qc_no, succ_prob_no = construct_circuit_coherent(H_eff, K1, t, opt = 'No')
 qc_opt, succ_prob_opt = construct_circuit_coherent(H_eff, K1, t, opt = 'Matrix-order')

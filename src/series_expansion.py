@@ -322,7 +322,7 @@ def simulate_circuit_statevec(qc: QuantumCircuit, ini_state, sel_state, reg_size
     qc_sim.compose(qc, qc_sim.qubits, inplace=True)
 
     qc_sim = transpile(qc_sim,  simulator, optimization_level=2)
-    # print(qc_sim.count_ops())
+    print(qc_sim.count_ops())
     qc_sim.save_statevector(label = 'final_state') #type: ignore
     # qc_sim = transpile(qc_sim, simulator, optimization_level=2)
     ### Sim task I: Get final statevector
