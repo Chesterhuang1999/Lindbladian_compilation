@@ -178,7 +178,7 @@ def higher_order_Lind_expansion(Lind: Lindbladian, K: int, q: int, t: float, K1:
     
     return qc_info, sel_state, reg_sizes, qc_coh_ctrl_size, qc_ensemble, kraus_count, ctrl_sizes, coeff_sum_square
 
-def construct_higher_order_circuit(Lind, K, q, t, K1, opt, structure = 'basic'):
+def construct_higher_order_circuit(Lind, K, q, t, K1, opt = 'No', structure = 'basic'):
 
     qc_info, sel_state, reg_sizes, qc_coh_ctrl_size, qc_ensemble, kraus_count, ctrl_sizes, coeff_sum_square = higher_order_Lind_expansion(Lind, K, q, t, K1, opt = opt)
     sel_size, ctrl_size_max, sys_size = reg_sizes
@@ -206,7 +206,10 @@ def construct_higher_order_circuit(Lind, K, q, t, K1, opt, structure = 'basic'):
                             + qc_main.qubits[sel_size + ctrl_size_max:])
     # print("All Kraus operators constructed")
     elif structure == 'optimized':
-        pass
+        circuits = [qc_info[0]] + qc_ensemble
+        qc_main = QuantumCircuit(2 * sel_size + ctrl_size_max + sys_size)
+        qc_main, _, _, _ = mulplex_U_opt(qc_main, circuits, sel_size, ctrl_size_max, sys_size)
+        reg_sizes = [sel_size, sel_size, ctrl_size_max, sys_size]
     return qc_main, reg_sizes, coeff_sum_square, sel_state
     # return qc_main, reg_sizes, coeff_sum_square
 
@@ -252,7 +255,84 @@ def projection_op_dm(dm: DensityMatrix, reg_sizes: list):
     projected_dm_sys = partial_trace(DensityMatrix(projected_dm), list(range(sel_size + ctrl_size)))
     return DensityMatrix(zero_small_complex(np.asarray(projected_dm_sys), tol = 1e-6))
 
-def projection_vec(sv: Statevector, dim: int, anc_size: int, ctrls: list):
+def projection_vec(sv: Statevector, dim: int, anc_size: int, ctrls: list, qubit_regs: list | None = None):
+    if qubit_regs is not None:
+        # Accept either explicit index layout
+        #   [select_idxs, ctrl_idxs, sys_idxs] or [select_idxs, anc_idxs, ctrl_idxs, sys_idxs]
+        # or size-only layout
+        #   [sel_size, ctrl_size, sys_size] or [sel_size, anc_size, ctrl_size, sys_size].
+        if all(isinstance(x, int) for x in qubit_regs):
+            if len(qubit_regs) == 3:
+                sel_size, ctrl_size, sys_size = qubit_regs
+                select_idxs = list(range(sel_size))
+                ctrl_idxs = list(range(sel_size, sel_size + ctrl_size))
+                sys_idxs = list(range(sel_size + ctrl_size, sel_size + ctrl_size + sys_size))
+                qubit_regs = [select_idxs, ctrl_idxs, sys_idxs]
+            elif len(qubit_regs) == 4:
+                sel_size, anc_size_local, ctrl_size, sys_size = qubit_regs
+                if anc_size_local != sel_size:
+                    raise ValueError("For optimized size-only layout, anc_size must equal sel_size.")
+                select_idxs = [2 * j for j in range(sel_size)]
+                anc_idxs = [2 * j + 1 for j in range(sel_size)]
+                ctrl_idxs = list(range(2 * sel_size, 2 * sel_size + ctrl_size))
+                sys_idxs = list(range(2 * sel_size + ctrl_size, 2 * sel_size + ctrl_size + sys_size))
+                qubit_regs = [select_idxs, anc_idxs, ctrl_idxs, sys_idxs]
+            else:
+                raise ValueError("Size-only qubit_regs must have length 3 or 4.")
+
+        data = np.asarray(sv.data if hasattr(sv, "data") else sv, dtype=complex).reshape(-1)
+
+        def place_bits(base_idx: int, local_idx: int, reg_qubits: list[int]) -> int:
+            out = base_idx
+            for bit_pos, qubit_id in enumerate(reg_qubits):
+                if ((local_idx >> bit_pos) & 1) == 1:
+                    out |= (1 << qubit_id)
+            return out
+
+        if len(qubit_regs) == 3:
+            select, ctrl, sys = qubit_regs
+            select_size, sys_size = len(select), len(sys)
+            dim_sys = 1 << sys_size
+            dim_sel = 1 << select_size
+
+            post_amp_sys_sel = np.zeros((dim_sys, dim_sel), dtype=complex)
+
+            # ctrl qubits are post-selected to |0...0|
+            for sys_idx in range(dim_sys):
+                for sel_idx in range(dim_sel):
+                    flat_idx = 0
+                    flat_idx = place_bits(flat_idx, sel_idx, select)
+                    flat_idx = place_bits(flat_idx, sys_idx, sys)
+                    post_amp_sys_sel[sys_idx, sel_idx] = data[flat_idx]
+
+            if select_size == 0:
+                out = post_amp_sys_sel[:, 0]
+                return Statevector(zero_small_complex(out, tol=1e-8))
+
+            rho_sys = np.einsum('as,bs->ab', post_amp_sys_sel, post_amp_sys_sel.conj())
+            return DensityMatrix(zero_small_complex(rho_sys, tol=1e-8))
+
+        if len(qubit_regs) == 4:
+            select, anc, ctrl, sys = qubit_regs
+            select_size, sys_size = len(select), len(sys)
+            dim_sys = 1 << sys_size
+            dim_sel = 1 << select_size
+
+            post_amp_sys_sel = np.zeros((dim_sys, dim_sel), dtype=complex)
+
+            # anc and ctrl qubits are post-selected to |0...0|
+            for sys_idx in range(dim_sys):
+                for sel_idx in range(dim_sel):
+                    flat_idx = 0
+                    flat_idx = place_bits(flat_idx, sel_idx, select)
+                    flat_idx = place_bits(flat_idx, sys_idx, sys)
+                    post_amp_sys_sel[sys_idx, sel_idx] = data[flat_idx]
+
+            rho_sys = np.einsum('as,bs->ab', post_amp_sys_sel, post_amp_sys_sel.conj())
+            return DensityMatrix(zero_small_complex(rho_sys, tol=1e-8))
+
+        raise ValueError("Unsupported qubit_regs layout, expected [select, ctrl, sys] or [select, anc, ctrl, sys].")
+
     sel_size = anc_size - len(ctrls)
     
     # proj_0 = Operator.from_label('0' * len(ctrls))
@@ -329,7 +409,17 @@ def simulate_circuit_statevec(qc: QuantumCircuit, ini_state, sel_state, reg_size
     result = simulator.run(qc_sim, shots = 1).result()
     final_state = result.data()['final_state']
 
-    final_state_sys = projection_vec(final_state, sel_size + ctrl_size + sys_size, sel_size + ctrl_size, list(range(sel_size, sel_size + ctrl_size)))
+    select_indexes = list(range(sel_size))
+    ctrl_indexes = list(range(sel_size, sel_size + ctrl_size))
+    sys_indexes = list(range(sel_size + ctrl_size, sel_size + ctrl_size + sys_size))
+
+    final_state_sys = projection_vec(
+        final_state,
+        sel_size + ctrl_size + sys_size,
+        sel_size + ctrl_size,
+        list(range(sel_size, sel_size + ctrl_size)),
+        qubit_regs=[select_indexes, ctrl_indexes, sys_indexes],
+    )
     return final_state_sys
     # return final_dm
 
@@ -444,19 +534,20 @@ def projection_op_dm_optimized(dm: DensityMatrix, reg_sizes_opt: list):
 def simulate_circuit_statevec_optimized(qc: QuantumCircuit, ini_state, sel_state, reg_sizes_opt: list):
     """
     Optimized-select simulator for circuit layout:
-    [top, sel, sel_anc, ctrl, sys]
+    [sel_0, anc_0, sel_1, anc_1, ..., ctrl..., sys...]
     """
     simulator = AerSimulator(method='statevector')
 
-    sel_size, sel_aux_size, ctrl_size, sys_size = reg_sizes_opt
-    sel_anc_size = max(sel_aux_size - 1, 0)
+    sel_size, anc_size, ctrl_size, sys_size = reg_sizes_opt
+
+    select_indexes = [2 * j for j in range(sel_size)]
+    anc_indexes = [2 * j + 1 for j in range(sel_size)]
+    ctrl_indexes = list(range(2 * sel_size, 2 * sel_size + ctrl_size))
+    sys_indexes = list(range(2 * sel_size + ctrl_size, 2 * sel_size + ctrl_size + sys_size))
 
     qc_sim = QuantumCircuit(qc.num_qubits)
 
-    state_ctrl = Statevector.from_label('0' * ctrl_size) if ctrl_size > 0 else Statevector([1.0])
-    state_sel_anc = Statevector.from_label('0' * sel_anc_size) if sel_anc_size > 0 else Statevector([1.0])
     state_sel = Statevector(sel_state)
-    state_top = Statevector.from_label('1')
 
     if isinstance(ini_state, str):
         state_sys = Statevector.from_label(ini_state)
@@ -465,10 +556,12 @@ def simulate_circuit_statevec_optimized(qc: QuantumCircuit, ini_state, sel_state
     else:
         raise TypeError("ini_state must be str or Statevector for statevector simulation.")
 
-    # Keep the same tensor style as existing code
-    state_tot = state_sys.tensor(state_ctrl).tensor(state_sel_anc).tensor(state_sel).tensor(state_top)
-
-    qc_sim.initialize(state_tot)
+    qc_sim.initialize(state_sel, select_indexes)
+    if anc_size > 0:
+        qc_sim.initialize(Statevector.from_label('0' * anc_size), anc_indexes)
+    if ctrl_size > 0:
+        qc_sim.initialize(Statevector.from_label('0' * ctrl_size), ctrl_indexes)
+    qc_sim.initialize(state_sys, sys_indexes)
     
     qc_sim.compose(qc, qc_sim.qubits, inplace=True)
     qc_sim = transpile(qc_sim, simulator, optimization_level=2)
@@ -476,8 +569,7 @@ def simulate_circuit_statevec_optimized(qc: QuantumCircuit, ini_state, sel_state
 
     result = simulator.run(qc_sim, shots=1).result()
     final_state = result.data()['final_state']
-    final_dm_sys = projection_op_dm_optimized(DensityMatrix(final_state), reg_sizes_opt)
-    return final_dm_sys
+    return projection_vec(final_state, qc_sim.num_qubits, 0, [], qubit_regs=[select_indexes, anc_indexes, ctrl_indexes, sys_indexes])
 # ...existing code...
 def simulate_circuit_repeat(qc: QuantumCircuit, ini_state, sel_state, coeff_sum: float, reg_sizes: list, repeat: int):
     """

@@ -51,6 +51,7 @@ class PauliAtom(OperatorAtom):
     
 class MatrixAtom(OperatorAtom):
     def __init__(self, mat: np.ndarray, phase: complex = 1.0):
+        super().__init__(phase)
         self.mat = mat
         self.size = mat.shape[0]
 
@@ -248,7 +249,13 @@ class Lindbladian:
             total += 0.5 * L.pauli_norm()**2
 
         return total
+    def operator_norm(self):
+        total = np.linalg.norm(self.H.eff_op().data, ord=2) #type: ignore
+        for L in self.L_list:
+            total += np.linalg.norm(L.eff_op().data, ord=2)**2
     
+        return total
+
     def effective_H(self) -> Matrixsum:
         """
         Return the effective Hamiltonian H_eff = H - i/2 sum L^dag L

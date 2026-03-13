@@ -849,8 +849,14 @@ class BlockEncoding:
                     cxcount += cx_counts_per_ccx
                 # opt_circuit.append(qc_pauli.to_gate().control(num_ctrl_qubits = 1, ctrl_state = '1'), list(range(2 * ctrl_size - 1 , 2 * ctrl_size + numq)))
                 opt_circuit.append(qc_pauli.to_gate().control(num_ctrl_qubits = 1, ctrl_state = '1'), [0] + list(range(2 * ctrl_size, 2 * ctrl_size + numq)))
-                opt_circuit.cx(anc_regs[ctrl_size - 2], anc_regs[ctrl_size - 1])
-                cxcount += 1 + pauli_length
+                if ctrl_size >= 2:
+                    opt_circuit.cx(anc_regs[ctrl_size - 2], anc_regs[ctrl_size - 1])
+                    cxcount += 1 + pauli_length
+                else:
+                    # For a single ancilla line, CX(a, a) is invalid in Qiskit.
+                    # Use X to advance the ancilla state for the next control value.
+                    opt_circuit.x(anc_regs[0])
+                    cxcount += pauli_length
             elif i == len(mat_list) - 1:
                 cval_prev = bin(i - 1)[2:].zfill(ctrl_size)
                 diff_prev = next(j for j in range(ctrl_size) if cval_prev[j] != control_values[j])
