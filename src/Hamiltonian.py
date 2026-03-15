@@ -60,7 +60,6 @@ def qsvt_Hamiltonian(J: Matrixsum, t: float, deg: int = 4, opt = 'No'):
     for i in range(1, len(sin_phi_values)):
         sin_phi_values[i] += np.pi / 2 #type: ignore
     sin_phi_values[-1] += 3 * np.pi / 4 #type: ignore
-
     QSVT_basic_gadget = qc_basic.to_gate(label = "QSVT_basic_gadget") 
     
     if ctrl_size == 0:
@@ -222,9 +221,12 @@ def qdrift_reps_lower_bound(
         "r_lower_bound_int": r_int,
     }
 
-# if __name__ == "__main__":
+if __name__ == "__main__":
     # from simulator_utils import simulate_circuit_statevec, normalize
-
+    H = [('XX', 1), ('YY', 1)]
+    lind = Lindbladian(H, [])
+    H_eff = lind.H
+    qc_basic, qc_main, _ = qsvt_Hamiltonian(H_eff, t=0.1, deg=4, opt='Matrix-order')
     # delta_t = 0.1
     # err_th = 1e-4
     # pauli_2bit = [''.join(p) for p in product('IXYZ', repeat=2)]

@@ -4,7 +4,7 @@ from qiskit import QuantumCircuit, transpile
 from qiskit.quantum_info import Statevector, Kraus, DensityMatrix, Stinespring
 from qiskit_aer import AerSimulator
 from qiskit.circuit.library import Isometry
-
+import time
 try:
     from .block_encoding import BlockEncoding
 except ImportError:
@@ -166,7 +166,7 @@ def test_block_encoding_no_vs_matrix_order(n: int, seed: int = 7, tol: float = 1
     kraus_ops = ensemble.channels[0][1]
 
     rng = np.random.default_rng(seed)
-
+    start = time.time()
     print(f"[test] n={n}, total_kraus={len(kraus_ops)}, seed={seed}, trace_distance_tol={tol}")
     idx = 0
     all_pass = True
@@ -198,11 +198,11 @@ def test_block_encoding_no_vs_matrix_order(n: int, seed: int = 7, tol: float = 1
             all_pass = all_pass and passed
 
             print(f"K_{{{i},{b}}}: ctrl_no={ctrl_no}, ctrl_mo={ctrl_mo}, p_no={p_no:.6e}, p_mo={p_mo:.6e}, trace_distance={trace_dist:.12e}, pass={passed}")
-            print(f"K_{{{i},{b}}} mobius_phase_result: {be_mo.mobius_phase_result}")
+            # print(f"K_{{{i},{b}}} mobius_phase_result: {be_mo.mobius_phase_result}")
 
             idx += 1
-
-    print(f"[summary] all_pass={all_pass}")
+    end = time.time()
+    print(f"[summary] all_pass={all_pass}, elapsed_time={end-start:.6f}s")
 
 
 def test_kraus_to_instruction(n: int = 3, seed: int = 7) -> None:
@@ -212,6 +212,7 @@ def test_kraus_to_instruction(n: int = 3, seed: int = 7) -> None:
     """
     ensemble = build_hypercube_section52_channel(n)
     kraus_ops = ensemble.channels[0][1]
+    print(kraus_ops)
     kraus_mats = [kms.eff_op().to_matrix() for kms in kraus_ops]
 
     kraus_channel = Kraus(kraus_mats)  # type: ignore[arg-type]
@@ -221,14 +222,13 @@ def test_kraus_to_instruction(n: int = 3, seed: int = 7) -> None:
     qc.append(kraus_inst, range(n))
 
     try:
-        tqc = transpile(qc, basis_gates=['cx', 'u3'], optimization_level=3)
-        transpile_mode = "basis=[cx,u3], opt=3"
+        tqc = transpile(qc,  optimization_level=0)
+        transpile_mode = "basis=[cx,u3], opt=0"
     except Exception as exc:
         # Some Qiskit versions cannot synthesize Kraus instruction into cx/u3 basis.
-        tqc = transpile(qc, optimization_level=3)
-        transpile_mode = f"fallback-default(opt=3) due to {type(exc).__name__}"
+        tqc = transpile(qc, optimization_level=0)
+        transpile_mode = f"fallback-default(opt=0) due to {type(exc).__name__}"
     ops = {str(k): int(v) for k, v in tqc.count_ops().items()}
-
     rng = np.random.default_rng(seed)
     psi = rng.normal(size=2**n) + 1j * rng.normal(size=2**n)
     psi = psi / np.linalg.norm(psi)
@@ -281,18 +281,20 @@ def test_stinespring_isometry(n: int = 3, seed: int = 7) -> None:
 
     # Synthesize the isometry as a decomposable circuit.
     # IMPORTANT: qargs are reversed to match Isometry's internal qubit ordering convention.
+    start = time.time()
     iso = Isometry(A_pad, num_ancillas_zero=0, num_ancillas_dirty=0)
     qc = QuantumCircuit(env_qubits + n, name=f"hypercube_stine_iso_n{n}")
     qc.append(iso, list(range(env_qubits + n))[::-1])
 
-    tqc = transpile(qc, basis_gates=['cx', 'u3'], optimization_level=0)
+    tqc = transpile(qc, basis_gates=['cx', 'u3'], optimization_level=3)
     ops = {str(k): int(v) for k, v in tqc.count_ops().items()}
-
+    end = time.time()
     print(f"[stinespring-iso-test] n={n}, seed={seed}")
     print(f"env_dim={d_env}, env_qubits={env_qubits}, env_dim_padded={d_env_pad}")
     print(f"instruction_qubits={qc.num_qubits}, transpiled_qubits={tqc.num_qubits}")
     print(f"depth={tqc.depth()}, size={tqc.size()}")
     print(f"gatecount={ops}")
+    print(f"elapsed_time={end-start:.6f}s")
 
 
 __all__ = [

@@ -172,7 +172,8 @@ def get_adaptive_qsp_phases(func, degree):
     else:
         coeffs[0::2] = 0.0
 
-    phases = QuantumSignalProcessingPhases(coeffs, signal_operator="Wx")
+    phases, _, _ = QuantumSignalProcessingPhases(coeffs, signal_operator="Wx", method = "sym_qsp", chebyshev_basis= True)
+    # phases = QuantumSignalProcessingPhases(coeffs, signal_operator="Wx")
     return phases, max_value
 
 def lcu_prepare_tree(weights):
