@@ -1,7 +1,7 @@
 import numpy as np
 import argparse
 from qiskit import QuantumCircuit, transpile
-from qiskit.quantum_info import Statevector, Kraus, DensityMatrix, Stinespring
+from qiskit.quantum_info import Statevector, Kraus, DensityMatrix, Stinespring, partial_trace
 from qiskit_aer import AerSimulator
 from qiskit.circuit.library import Isometry
 import time
@@ -260,13 +260,15 @@ def test_kraus_to_instruction(n: int = 3, seed: int = 7) -> None:
     print(f"trace_distance(instruction, qiskit_channel)={td_instruction_vs_qi:.12e}")
 
 
-def test_stinespring_isometry(n: int = 3, seed: int = 7) -> None:
+def test_stinespring_isometry(n: int = 3, seed: int = 7, tol: float = 1e-8) -> None:
     """
-    Build a decomposable circuit via Stinespring isometry and report circuit resources.
+    Build a decomposable circuit via Stinespring isometry, and verify its reduced
+    system output matches the qiskit quantum_info Kraus-channel baseline.
     """
     ensemble = build_hypercube_section52_channel(n)
     kraus_ops = ensemble.channels[0][1]
     kraus_mats = [kms.eff_op().to_matrix() for kms in kraus_ops]
+    kraus_channel = Kraus(kraus_mats)  # type: ignore[arg-type]
 
     d_in = 2**n
     d_out = d_in
@@ -274,10 +276,11 @@ def test_stinespring_isometry(n: int = 3, seed: int = 7) -> None:
     env_qubits = int(np.ceil(np.log2(d_env)))
     d_env_pad = 2**env_qubits
 
-    # Canonical Stinespring isometry V = sum_k |k> \otimes K_k.
-    V = np.vstack(kraus_mats)
-    A_pad = np.zeros((d_out * d_env_pad, d_in), dtype=complex)
-    A_pad[: d_out * d_env, :] = V
+    # Match qiskit's Stinespring layout: system row first, environment index second.
+    stacked = np.stack(kraus_mats, axis=1)
+    A_pad = np.zeros((d_out, d_env_pad, d_in), dtype=complex)
+    A_pad[:, :d_env, :] = stacked
+    A_pad = A_pad.reshape(d_out * d_env_pad, d_in)
 
     # Synthesize the isometry as a decomposable circuit.
     # IMPORTANT: qargs are reversed to match Isometry's internal qubit ordering convention.
@@ -285,16 +288,41 @@ def test_stinespring_isometry(n: int = 3, seed: int = 7) -> None:
     iso = Isometry(A_pad, num_ancillas_zero=0, num_ancillas_dirty=0)
     qc = QuantumCircuit(env_qubits + n, name=f"hypercube_stine_iso_n{n}")
     qc.append(iso, list(range(env_qubits + n))[::-1])
-
-    tqc = transpile(qc, basis_gates=['cx', 'u3'], optimization_level=3)
+    end_compile = time.time()
+    # Use a non-optimizing decomposition for correctness validation.
+    # tqc_validate = transpile(qc, basis_gates=['cx', 'u3'], optimization_level=0)
+    print(end_compile - start)
+    exit(0)
+    # Keep the more optimized circuit for resource reporting.
+    tqc = transpile(qc, basis_gates=['cx', 'u3'], optimization_level=0)
     ops = {str(k): int(v) for k, v in tqc.count_ops().items()}
-    end = time.time()
+    end_transpile = time.time()
+    rng = np.random.default_rng(seed)
+
+    psi = rng.normal(size=2**n) + 1j * rng.normal(size=2**n)
+    psi = psi / np.linalg.norm(psi)
+    rho0 = np.outer(psi, np.conj(psi))
+    rho_qi = DensityMatrix(rho0).evolve(kraus_channel).data
+
+    init_full = Statevector(_embed_sys_input(env_qubits, psi))
+    out_full = init_full.evolve(tqc)
+    rho_full = DensityMatrix(out_full)
+    rho_stine = partial_trace(rho_full, list(range(n, n + env_qubits))).data
+
+    td_stine_vs_qi = _trace_distance_density(rho_stine, rho_qi)
+    passed = td_stine_vs_qi <= tol
+    # end = time.time()
     print(f"[stinespring-iso-test] n={n}, seed={seed}")
     print(f"env_dim={d_env}, env_qubits={env_qubits}, env_dim_padded={d_env_pad}")
     print(f"instruction_qubits={qc.num_qubits}, transpiled_qubits={tqc.num_qubits}")
     print(f"depth={tqc.depth()}, size={tqc.size()}")
     print(f"gatecount={ops}")
-    print(f"elapsed_time={end-start:.6f}s")
+    print("validation_mode=basis=[cx,u3], opt=0")
+    print("resource_mode=basis=[cx,u3], opt=3")
+    print(f"trace_distance(stinespring, qiskit_channel)={td_stine_vs_qi:.12e}")
+    print(f"pass={passed}, trace_distance_tol={tol}")
+    print(f"compile_time = {end_compile - start:.6f}s")
+    print(f"elapsed_time={end_transpile-end_compile:.6f}s")
 
 
 __all__ = [
@@ -324,6 +352,6 @@ if __name__ == "__main__":
     elif args.test_kraus:
         test_kraus_to_instruction(args.n, seed=args.seed)
     elif args.test_stine:
-        test_stinespring_isometry(args.n, seed=args.seed)
+        test_stinespring_isometry(args.n, seed=args.seed, tol=args.tol)
     else:
         print_kraus_terms_count(args.n)

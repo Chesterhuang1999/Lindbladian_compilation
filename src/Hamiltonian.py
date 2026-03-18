@@ -39,7 +39,7 @@ def qsvt_Hamiltonian(J: Matrixsum, t: float, deg: int = 4, opt = 'No'):
     cos_func = lambda x: np.cos(subnorm_fac * t * x)
     cos_phi_values, max_value_cos = get_adaptive_qsp_phases(cos_func, deg)
     sin_func = lambda x: np.sin(subnorm_fac * t * x)
-    sin_phi_values, max_value_sin = get_adaptive_qsp_phases(sin_func, deg - 1)
+    sin_phi_values, max_value_sin = get_adaptive_qsp_phases(sin_func, deg + 1)
     
     # cos_phi_values[0] += np.pi / 4 #type:ignore
     # for i in range(1, len(cos_phi_values) - 1):

@@ -123,7 +123,17 @@ class Matrixsum:
     
         return Matrixsum(out).simplify()
     
-
+    def poly(self, deg):
+        ## Compute the polynomial expansion of the Matrixsum up to degree deg
+        if deg == 0:
+            return self.identity(self.size)
+        elif deg == 1:
+            return self
+        else: 
+            result = self
+            for _ in range(deg - 1):
+                result = result.mul(self)
+            return result.simplify()
     def adj(self):
         new_instances = []
         for inst, c in self.instances:

@@ -72,11 +72,13 @@ def channel_norm_zero(channel: list, psi: Statevector) -> float:
     return norm
 
 
-### Construct a single channel from Lindbladian
+### Construct a single channel from Lindbladian, p
 def Lindblad_to_channel(Lind: Lindbladian, delta_t: float):
     sqdelta = np.sqrt(delta_t)
     channels = []
-    iden = PauliAtom('I' * int(np.log2(Lind.H.instances[0][0].to_operator().dim[0])), phase = 1.0)
+    size = Lind.H.size if Lind.H.size != 0  else Lind.L_list[0].size
+    # iden = PauliAtom('I' * int(np.log2(Lind.H.instances[0][0].to_operator().dim[0])), phase = 1.0)
+    iden = PauliAtom('I' * size, phase = 1.0)
     kraus_0_basis = Matrixsum([(iden, 1.0)])
 
     H_copy = deepcopy(Lind.H)
@@ -231,6 +233,7 @@ def channel_to_LCU (ensem: channel_ensemble, structure = 'basic', opt = 'No') ->
             ctrl_value = bin(i)[2:].zfill(select_size)
             ctrl_v_rev = ctrl_value[::-1]
             qc_be_ms = BlockEncoding(ms).circuit(opt = opt)
+            print(qc_be_ms.draw())
             ctrl_size_ms = qc_be_ms.num_qubits - sys_size
             # U_be_ms = qc_be_ms.to_gate().control(num_ctrl_qubits=select_size, ctrl_state=ctrl_value)
             U_be_ms = qc_be_ms.to_gate().control(num_ctrl_qubits=select_size, ctrl_state=ctrl_v_rev)
