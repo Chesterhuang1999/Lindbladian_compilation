@@ -5,6 +5,6 @@
 /Outdated/
 .vscode
 /benchmark/*
-
+*.pyc
 /Results/*
 /Papers/*

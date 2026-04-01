@@ -53,7 +53,7 @@ class MatrixAtom(OperatorAtom):
     def __init__(self, mat: np.ndarray, phase: complex = 1.0):
         super().__init__(phase)
         self.mat = mat
-        self.size = mat.shape[0]
+        self.size = int(np.ceil(np.log2(mat.shape[0])))
 
     def adjoint(self):
         return MatrixAtom(self.mat.conj().T, np.conj(self.phase))
@@ -75,8 +75,7 @@ class MatrixAtom(OperatorAtom):
         
     def to_operator(self) -> Operator:
         return Operator(self.eff_op())
-    
-    
+      
 class Matrixsum:
     """
     Linear combination of OperatorAtom matrices.
@@ -89,7 +88,15 @@ class Matrixsum:
                 phase = coeff / abs(coeff)
                 inst.phase *= phase
                 coeff = abs(coeff)  
-        self.size = max([inst.size for inst, _ in self.instances]) if self.instances else 0
+        ## Assert that all instances have the same size
+        if self.instances:
+            self.size = self.instances[0][0].size
+            for inst, _ in self.instances:
+                assert inst.size == self.size, "All instances must have the same size"
+        else:
+            self.size = 0
+        # self.size = max([inst.size for inst, _ in self.instances]) if self.instances else 0
+
         self.length = len(self.instances)
         self.ctrl_size = int(np.ceil(np.log2(self.length))) if self.length > 0 else 0
 
@@ -182,7 +189,33 @@ class Matrixsum:
                     new_instances.append((MatrixAtom(key, phase = total_coeff / abs(total_coeff)), abs(total_coeff)))
 
         return Matrixsum(new_instances)
-    
+    def is_proportional(self, other, tol=1e-10):
+        """
+        Check if self = c * other for some complex number c.
+
+        Returns:
+            (True, c) if proportional, otherwise (False, 0.0).
+        """
+        if not isinstance(other, Matrixsum):
+            raise TypeError("Can only compare with another Matrixsum")
+
+        # def _dense_matrix(ms):
+        #     total = None
+        #     for inst, coeff in ms.instances:
+        #         op = inst.to_operator().data * coeff
+        #         if total is None:
+        #             total = np.array(op, dtype=complex)
+        #         else:
+        #             total = total + op
+        #     return total
+
+        if self.length == 0 and other.length == 0:
+            return True, 1.0
+        elif self.length == 0 or other.length == 0:
+            return False, 0.0
+
+        
+
     def remove_iden(self):
         iden_coeff = 0.0
         for inst, c in self.instances:
@@ -295,9 +328,50 @@ class Lindbladian:
         for L in self.L_list:
             repr_str += f"{L}\n"
         return repr_str
-class channel_ensemble:
+    
+class channel:
+    """ 
+    An intermediate representation for a quantum channel, represented as a list of Kraus operators in Matrixsum form. 
+    The Matrixsum form naturally supports syntax-level rewrites for Kraus operators, such as zero elim, merging and unitary transform. 
     """
-    A intermediate representation for the (probabilistic ensemble) of quantum channels.
+    def __init__(self, kraus_ops: list):
+        self.kraus_ops = []
+        self.size = None
+        for op in kraus_ops:
+            if isinstance(op, Matrixsum):
+            
+                self.kraus_ops.append(op)
+                ## Type checking: checking dimensional consistency of Kraus operators. All Kraus operators must have the same size.
+                ## If op.size = 0, it is a zero operator, which can be ignored for check.
+                if op.size != 0: 
+                    if self.size is None:
+                        self.size = op.size
+                    else: 
+                        assert self.size == op.size, "All Kraus operators must have the same size"
+            else:
+                raise ValueError("Kraus operators must be in Matrixsum form")
+
+
+    ### Channel-IR rewrite rules  
+    # zero elimination: eliminate all zero Kraus operators (i.e. Matrixsum with no instances), update the size.   
+    def zero_elim(self):
+        """Eliminate zero Kraus operators."""
+        self.kraus_ops = [op for op in self.kraus_ops if op.length > 0]
+        if len(self.kraus_ops) == 0:
+            self.size = None
+        return self
+    
+    def merging(self):
+        """Merge Kraus operators that are proportional to each other, i.e. K1 = c * K2. """
+        # First eliminate zero operators
+        self.zero_elim()
+
+
+
+class channel_ensemble:
+
+    """
+    An intermediate representation for the (probabilistic ensemble) of quantum channels.
     The channels are of the form: [(s_j, E_j)], where s_j is the probability weight and 
     E_j = sum_l A_jk\rho A_jk^dagger is the j-th quantum channel in the ensemble. 
     """
@@ -323,7 +397,7 @@ class channel_ensemble:
                 self.size = inst.size
             self.channels.append((probs[i], channel))
 
-   
+    
 
 
 

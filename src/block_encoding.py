@@ -733,7 +733,7 @@ class BlockEncoding:
         self.circuit_width = 0
     ## Basic version of multiplexed_u implementation: directly control each unitary by the control register, without optimization over the structure of the matrices.
     def mulplex_U(self, mat_list, ctrl_size, sys_size):
-        
+        tcount, mccount, cxcount = 0, 0, 0
         t_count_per_ctrl = 4 
         cx_count_per_ctrl = 4
         mccount = 0
@@ -745,7 +745,7 @@ class BlockEncoding:
             qc_pauli.append(pauli_op, range(pauli_op.num_qubits)) #type: ignore
             qc_pauli.global_phase = np.angle(phase)
             qc_pauli = qc_pauli.decompose()
-            return qc_pauli
+            return qc_pauli, 0, 0, 0
     
         qc = QuantumCircuit(ctrl_size + sys_size)
         ### For test: genearte the order for matrices
@@ -1205,16 +1205,17 @@ class BlockEncoding:
         if self.ctrl_size == 0:
             sys = QuantumRegister(self.sys_size, 'sys')
             qc = QuantumCircuit(sys)
-            if opt == False:
+            if opt == 'No':
                 qc_u, tcount, mccount, cxcount = self.mulplex_U(self.mat_list, 0, self.sys_size)
-            else:
-                qc_u, tcount, mccount, cxcount = self.mulplex_U_opt(self.mat_list, 0, self.sys_size)
+            elif opt == 'Matrix-order':
+                qc_u, tcount, mccount, cxcount = self.mulplex_U_opt_order(self.mat_list, 0, self.sys_size)
             qc.compose(qc_u, qubits=sys[:], inplace=True)
             self.circuit_width = qc.num_qubits
             return qc
         
         if opt == 'No':
             qc_u, tcount, mccount, cxcount = self.mulplex_U(self.mat_list, self.ctrl_size, self.sys_size)
+            print(tcount, mccount, cxcount)
             ctrl = QuantumRegister(self.ctrl_size, 'ctrl')
             sys = QuantumRegister(self.sys_size, 'sys')
             qc = QuantumCircuit(ctrl, sys)
