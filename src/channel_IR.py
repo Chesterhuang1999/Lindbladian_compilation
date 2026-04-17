@@ -3,6 +3,7 @@ from qiskit.quantum_info import Operator, SparsePauliOp, Pauli
 from abc import ABC, abstractmethod
 from collections import defaultdict 
 from copy import deepcopy
+from itertools import combinations
 class OperatorAtom(ABC):
     def __init__(self, phase: complex = 1.0):
         self.phase = round(phase.real, 15) + 1j * round(phase.imag, 15)
@@ -170,6 +171,36 @@ class Matrixsum:
     def identity(self, size: int):
         iden = Pauli('I' * size)
         return Matrixsum([(PauliAtom(iden, phase = 1.0), 1.0)])
+
+    def eliminate_global_phase(self, tol=1e-10):
+        """Shift all instance phases by a shared angle that maximizes zero-phase terms."""
+        if len(self.instances) == 0:
+            return Matrixsum([])
+
+        angles = [np.angle(inst.phase) for inst, _ in self.instances]
+
+        best_theta = angles[0]
+        best_count = -1
+        for theta in angles:
+            zero_count = 0
+            for angle in angles:
+                wrapped_diff = angle - theta
+                if abs(wrapped_diff) <= tol:
+                    zero_count += 1
+            if zero_count > best_count:
+                best_count = zero_count
+                best_theta = theta
+
+        global_factor = np.exp(-1j * best_theta)
+        adjusted_instances = []
+        for inst, coeff in self.instances:
+            new_phase = inst.phase * global_factor
+            if isinstance(inst, PauliAtom):
+                adjusted_instances.append((PauliAtom(inst.expr, phase=new_phase), coeff))
+            else:
+                adjusted_instances.append((MatrixAtom(inst.bare_op(), phase=new_phase), coeff))
+
+        return Matrixsum(adjusted_instances)
     
     def simplify(self):
         # Combine same OperatorAtom instances
@@ -188,7 +219,7 @@ class Matrixsum:
                 else:
                     new_instances.append((MatrixAtom(key, phase = total_coeff / abs(total_coeff)), abs(total_coeff)))
 
-        return Matrixsum(new_instances)
+        return Matrixsum(new_instances).eliminate_global_phase()
     def is_proportional(self, other, tol=1e-10):
         """
         Check if self = c * other for some complex number c.
@@ -199,22 +230,84 @@ class Matrixsum:
         if not isinstance(other, Matrixsum):
             raise TypeError("Can only compare with another Matrixsum")
 
-        # def _dense_matrix(ms):
-        #     total = None
-        #     for inst, coeff in ms.instances:
-        #         op = inst.to_operator().data * coeff
-        #         if total is None:
-        #             total = np.array(op, dtype=complex)
-        #         else:
-        #             total = total + op
-        #     return total
+        def _dense_matrix(ms):
+            total = None
+            for inst, coeff in ms.instances:
+                op = inst.to_operator().data * coeff
+                if total is None:
+                    total = np.array(op, dtype=complex)
+                else:
+                    total = total + op
+            return total
+
+        def _is_pauli_only(ms):
+            return all(isinstance(inst, PauliAtom) for inst, _ in ms.instances)
+
+        def _compare_dense(A, B):
+            if A is None and B is None:
+                return True, 1.0
+            if A is None or B is None:
+                return False, 0.0
+            if A.shape != B.shape:
+                return False, 0.0
+
+            if np.allclose(A, 0, atol=tol) and np.allclose(B, 0, atol=tol):
+                return True, 1.0
+            if np.allclose(B, 0, atol=tol):
+                return False, 0.0
+
+            idx = np.unravel_index(np.argmax(np.abs(B)), B.shape)
+            ref = B[idx]
+            if abs(ref) <= tol:
+                return False, 0.0
+
+            scale = A[idx] / ref
+            if np.allclose(A, scale * B, atol=tol, rtol=tol):
+                return True, scale
+            return False, 0.0
+
+        def _compare_pauli(ms1, ms2):
+            def _signature(ms):
+                sig = defaultdict(complex)
+                for inst, coeff in ms.instances:
+                    sig[inst.expr] += coeff * inst.phase
+                return sig
+
+            sig1 = _signature(ms1)
+            sig2 = _signature(ms2)
+
+            if set(sig1.keys()) != set(sig2.keys()):
+                return False, 0.0
+
+            if len(sig2) == 0:
+                return True, 1.0
+
+            ref_key = None
+            for key, value in sig2.items():
+                if abs(value) > tol:
+                    ref_key = key
+                    break
+
+            if ref_key is None:
+                if all(abs(value) <= tol for value in sig1.values()):
+                    return True, 1.0
+                return False, 0.0
+
+            scale = sig1[ref_key] / sig2[ref_key]
+            for key in sig1.keys():
+                if not np.isclose(sig1[key], scale * sig2[key], atol=tol, rtol=tol):
+                    return False, 0.0
+            return True, scale
 
         if self.length == 0 and other.length == 0:
             return True, 1.0
         elif self.length == 0 or other.length == 0:
             return False, 0.0
 
-        
+        if not (_is_pauli_only(self) and _is_pauli_only(other)):
+            return _compare_dense(_dense_matrix(self), _dense_matrix(other))
+
+        return _compare_pauli(self, other)
 
     def remove_iden(self):
         iden_coeff = 0.0
@@ -353,19 +446,448 @@ class channel:
 
 
     ### Channel-IR rewrite rules  
-    # zero elimination: eliminate all zero Kraus operators (i.e. Matrixsum with no instances), update the size.   
+     
     def zero_elim(self):
-        """Eliminate zero Kraus operators."""
+        """Eliminate zero Kraus operators and update the size of kraus_ops."""
         self.kraus_ops = [op for op in self.kraus_ops if op.length > 0]
         if len(self.kraus_ops) == 0:
             self.size = None
         return self
-    
-    def merging(self):
+
+     
+    def glob_phase_elim(self):
+        """
+        Global phase elimination: eliminate global phase for each Kraus operator, minimize the number of non-zero phases."""
+        self.kraus_ops = [op.eliminate_global_phase() for op in self.kraus_ops]
+        return self
+
+    def merging(self, tol=1e-10):
         """Merge Kraus operators that are proportional to each other, i.e. K1 = c * K2. """
         # First eliminate zero operators
         self.zero_elim()
 
+        merged_kraus_ops = []
+        visited = [False] * len(self.kraus_ops)
+
+        for i, base_op in enumerate(self.kraus_ops):
+            if visited[i]:
+                continue
+
+            visited[i] = True
+            norm_sq_sum = 1.0
+
+            for j in range(i + 1, len(self.kraus_ops)):
+                if visited[j]:
+                    continue
+
+                is_prop, scale = self.kraus_ops[j].is_proportional(base_op, tol=tol)
+                if is_prop:
+                    norm_sq_sum += abs(scale) ** 2
+                    visited[j] = True
+
+            merged_op = deepcopy(base_op).eliminate_global_phase()
+            merged_op.mul_coeffs(np.sqrt(norm_sq_sum))
+            merged_kraus_ops.append(merged_op)
+
+        self.kraus_ops = merged_kraus_ops
+        self.size = None if len(self.kraus_ops) == 0 else self.kraus_ops[0].size
+        return self
+
+    def permutation(self, perm: list):
+        """
+        Permute the order of Kraus operators.
+        """
+        assert len(perm) == len(self.kraus_ops), "Permutation length must match number of Kraus operators"
+        self.kraus_ops = [self.kraus_ops[i] for i in perm]
+    def two_kraus_unitary_transform(self):
+        """
+        Reshape the two Kraus operators K1, K2 into K1' = aK1 + bK2, K2' = -b^* K1 + a^*K2, where |a|^2 + |b|^2 = 1. 
+        """
+        pass
+
+    # ================================================================
+    # Heuristic rewrite search framework for unitary rewrite of Kraus operators
+    # ================================================================
+
+    def _coeff_matrix(self, tol=1e-12):
+        """
+        Extract the coefficient matrix A and the ordered Pauli label list.
+
+        Returns:
+            A: np.ndarray of shape (m, n), where m = #Kraus ops, n = #distinct Pauli labels.
+               Entry A[i,j] = signed coefficient of the j-th Pauli in the i-th Kraus op.
+            labels: list of str, the n distinct Pauli labels (column ordering).
+        """
+        label_set = {}
+        for op in self.kraus_ops:
+            for inst, coeff in op.instances:
+                if not isinstance(inst, PauliAtom):
+                    raise ValueError("Coefficient matrix extraction requires all PauliAtom instances")
+                key = inst.expr
+                if key not in label_set:
+                    label_set[key] = len(label_set)
+
+        labels = [''] * len(label_set)
+        for k, v in label_set.items():
+            labels[v] = k
+
+        m = len(self.kraus_ops)
+        n = len(labels)
+        
+        A = np.zeros((m, n), dtype=complex)
+        for i, op in enumerate(self.kraus_ops):
+            for inst, coeff in op.instances:
+                j = label_set[inst.expr]
+                # Keep full complex phase information. eliminate_global_phase only
+                # removes a shared phase and does not force each term to be real.
+                A[i, j] = coeff * inst.phase
+
+        # Zero out tiny entries  
+        A[np.abs(A) < tol] = 0.0
+        return A, labels
+
+    @staticmethod
+    def _support(A, tol=1e-12):
+        """Total number of non-zero entries in coefficient matrix."""
+        return int(np.sum(np.abs(A) > tol))
+
+    @staticmethod
+    def _row_supports(A, tol=1e-12):
+        """Number of non-zero entries per row."""
+        return np.array([int(np.sum(np.abs(A[i]) > tol)) for i in range(A.shape[0])])
+
+    @staticmethod
+    def _apply_givens(A, i, j, theta):
+        """
+        Apply a Givens rotation to rows i, j of matrix A (in-place on a copy).
+        
+        The rotation is:  [cos(theta)  -sin(theta)] [row_i]
+                          [sin(theta)   cos(theta)] [row_j]
+        
+        Returns the new matrix.
+        """
+        B = A.copy()
+        c, s = np.cos(theta), np.sin(theta)
+        B[i] = c * A[i] - s * A[j]
+        B[j] = s * A[i] + c * A[j]
+        return B
+
+    @staticmethod
+    def _candidate_angles_for_pair(A, i, j, tol=1e-12, n_grid=0):
+        """
+        Generate candidate Givens rotation angles for row pair (i, j).
+
+          Strategy:
+          1. For each column k where both A[i,k] and A[j,k] are nonzero,
+              if the ratio is (approximately) real, compute
+              theta = arctan(A[i,k] / A[j,k]) (zeros row i at col k)
+              and theta = arctan(-A[j,k] / A[i,k]) (zeros row j at col k).
+              For genuinely complex ratios, no exact real-theta cancellation exists.
+        2. For each column k where exactly one of A[i,k], A[j,k] is nonzero,
+           theta = 0 already preserves the zero structure.
+        3. Optionally add a coarse grid for exploration.
+
+        Returns:
+            List of candidate angles in (-pi/2, pi/2].
+        """
+        angles = {0.0}
+        ri, rj = A[i], A[j]
+
+        def _add_real_ratio_angle(ratio):
+            if abs(np.imag(ratio)) <= tol * (1.0 + abs(np.real(ratio))):
+                angles.add(float(np.arctan(np.real(ratio))))
+
+        for k in range(A.shape[1]):
+            ai, aj = ri[k], rj[k]
+            # theta that zeros A_new[i, k]: tan(theta) = ai / aj
+            if abs(aj) > tol:
+                _add_real_ratio_angle(ai / aj)
+            # theta that zeros A_new[j, k]: tan(theta) = -aj / ai
+            if abs(ai) > tol:
+                _add_real_ratio_angle(-aj / ai)
+
+        # Add grid angles for broader exploration (lightweight)
+        if n_grid > 0:
+            for g in np.linspace(-np.pi / 2, np.pi / 2, n_grid, endpoint=False):
+                angles.add(g)
+
+        return sorted(angles)
+
+    @staticmethod
+    def _best_rotation_for_pair(A, i, j, tol=1e-12, n_grid=0):
+        """
+        Find the best Givens rotation angle for pair (i, j).
+
+        The selection criterion only minimizes the support on the candidate pair
+        (rows i and j). For compatibility with existing callers, the returned
+        support is still the implied total support after the rotation.
+        
+        Returns:
+            (best_theta, best_support, best_A)
+        """
+        row_supports = channel._row_supports(A, tol)
+        old_pair_support = int(row_supports[i] + row_supports[j])
+        total_support = int(np.sum(row_supports))
+        unaffected_support = total_support - old_pair_support
+        candidates = channel._candidate_angles_for_pair(A, i, j, tol, n_grid)
+
+        best_theta = 0.0
+        best_pair_support = old_pair_support
+        best_support = total_support
+        best_A = A
+
+        for theta in candidates:
+            B = channel._apply_givens(A, i, j, theta)
+            B[np.abs(B) < tol] = 0.0
+            new_pair_support = int(np.sum(np.abs(B[i]) > tol) + np.sum(np.abs(B[j]) > tol))
+            if new_pair_support < best_pair_support:
+                best_pair_support = new_pair_support
+                best_support = unaffected_support + new_pair_support
+                best_theta = theta
+                best_A = B
+
+        return best_theta, best_support, best_A
+
+    def rewrite_search(self, strategy='greedy', beam_width=3, max_steps=50,
+                       n_grid=0, tol=1e-12, verbose=False, strict_beam=False):
+        """
+        Heuristic search for 2-level unitary rewrites that minimize total Pauli term count.
+        
+        Args:
+            strategy: 'greedy' — always pick the best single-step improvement.
+                      'beam'   — keep top beam_width states and explore all pair rotations.
+            beam_width: Number of states to keep at each step (only for 'beam').
+            max_steps: Maximum number of rewrite steps.
+            n_grid: Number of additional grid angles per pair (0 = analytical only).
+            tol: Numerical tolerance.
+            verbose: Print progress info.
+            strict_beam: If True, beam only accepts strictly improving candidates.
+                         If False, beam accepts no-worse candidates.
+            
+        Returns:
+            dict with keys:
+                'initial_support': int
+                'final_support': int
+                'steps': list of (pair, theta, support_after) tuples
+                'A_final': final coefficient matrix
+                'labels': Pauli labels
+        """
+        A, labels = self._coeff_matrix(tol)
+        m = A.shape[0]
+        initial_support = self._support(A, tol)
+
+        if strategy == 'greedy':
+            return self._greedy_search(A, labels, m, initial_support, max_steps, n_grid, tol, verbose)
+        elif strategy == 'beam':
+            return self._beam_search(
+                A,
+                labels,
+                m,
+                initial_support,
+                beam_width,
+                max_steps,
+                n_grid,
+                tol,
+                verbose,
+                strict_beam,
+            )
+        else:
+            raise ValueError(f"Unknown strategy: {strategy}")
+
+    def _greedy_search(self, A, labels, m, initial_support, max_steps, n_grid, tol, verbose):
+        """
+        Greedy: always apply the single best rotation.
+        
+        Optimization: only compute support change for the two affected rows,
+        rather than recomputing the entire matrix support each time.
+        """
+        steps = []
+        current_A = A.copy()
+        current_support = initial_support
+        support_trajectory = [initial_support]
+        stop_reason = "max_steps_reached"
+
+        for step in range(max_steps):
+            best_pair = None
+            best_theta = 0.0
+            best_delta = 0  # Change in support (negative means improvement)
+
+            # Pre-compute row supports for current matrix
+            row_supports = self._row_supports(current_A, tol)
+
+            for i, j in combinations(range(m), 2):
+                old_support_i = row_supports[i]
+                old_support_j = row_supports[j]
+                old_pair_support = old_support_i + old_support_j
+
+                # Generate candidate angles for this pair
+                candidates = self._candidate_angles_for_pair(current_A, i, j, tol, n_grid)
+
+                for theta in candidates:
+                    # Apply rotation and compute new support only for rows i, j
+                    B_rotated = self._apply_givens(current_A, i, j, theta)
+                    B_rotated[np.abs(B_rotated) < tol] = 0.0
+
+                    new_support_i = int(np.sum(np.abs(B_rotated[i]) > tol))
+                    new_support_j = int(np.sum(np.abs(B_rotated[j]) > tol))
+                    new_pair_support = new_support_i + new_support_j
+
+                    # Delta: change in support (negative is good)
+                    delta = new_pair_support - old_pair_support
+
+                    if delta < best_delta:
+                        best_delta = delta
+                        best_theta = theta
+                        best_pair = (i, j)
+
+            if best_pair is None or best_delta >= 0:
+                stop_reason = "no_improvement"
+                if verbose:
+                    print(f"  Step {step}: no improvement found, stopping.")
+                break
+
+            # Apply the best rotation
+            i, j = best_pair
+            current_A = self._apply_givens(current_A, i, j, best_theta)
+            current_A[np.abs(current_A) < tol] = 0.0
+            current_support += best_delta
+            support_trajectory.append(current_support)
+
+            steps.append((best_pair, best_theta, current_support))
+            if verbose:
+                print(f"  Step {step}: rotate pair {best_pair}, theta={best_theta:.6f}, "
+                      f"delta={best_delta}, support={current_support}")
+
+        return {
+            'initial_support': initial_support,
+            'final_support': current_support,
+            'steps': steps,
+            'A_final': current_A,
+            'labels': labels,
+            'termination': {
+                'stop_reason': stop_reason,
+                'iterations': len(steps),
+                'max_steps': max_steps,
+                'support_trajectory': support_trajectory,
+            },
+        }
+
+    def _beam_search(self, A, labels, m, initial_support, beam_width, max_steps, n_grid, tol, verbose, strict_beam):
+        """
+        Beam search: maintain top beam_width states, expand all pair rotations.
+        Allows zero-gain steps to escape local minima.
+        """
+        # State: (support, A_matrix, steps_list)
+        beam = [(initial_support, A.copy(), [])]
+        global_best = (initial_support, A.copy(), [])
+        best_support_trajectory = [initial_support]
+        stop_reason = "max_steps_reached"
+        iterations = 0
+
+        for step in range(max_steps):
+            iterations += 1
+            candidates = []
+
+            for sup, state_A, state_steps in beam:
+                for i, j in combinations(range(m), 2):
+                    theta, new_sup, new_A = self._best_rotation_for_pair(state_A, i, j, tol, n_grid)
+                    # Accept policy for beam expansion.
+                    if (strict_beam and new_sup < sup) or ((not strict_beam) and new_sup <= sup):
+                        new_steps = state_steps + [((i, j), theta, new_sup)]
+                        candidates.append((new_sup, new_A, new_steps))
+
+                        if new_sup < global_best[0]:
+                            global_best = (new_sup, new_A.copy(), list(new_steps))
+
+            if not candidates:
+                stop_reason = "no_candidates"
+                if verbose:
+                    print(f"  Step {step}: no candidates, stopping.")
+                break
+
+            # Deduplicate by support signature (row supports as tuple)
+            seen = {}
+            for sup, cA, csteps in candidates:
+                key = tuple(sorted(self._row_supports(cA, tol)))
+                if key not in seen or sup < seen[key][0]:
+                    seen[key] = (sup, cA, csteps)
+
+            unique = sorted(seen.values(), key=lambda x: x[0])
+            beam = unique[:beam_width]
+
+            if verbose:
+                supports = [s for s, _, _ in beam]
+                print(f"  Step {step}: beam supports = {supports}, global best = {global_best[0]}")
+
+            best_support_trajectory.append(global_best[0])
+
+            # Early termination: if global best hasn't improved in this step
+            if beam[0][0] >= global_best[0] and step > 0:
+                # Check if all beam states are at or above global best
+                if all(s >= global_best[0] for s, _, _ in beam):
+                    stop_reason = "converged"
+                    if verbose:
+                        print(f"  Step {step}: beam converged at support={global_best[0]}")
+                    break
+
+        return {
+            'initial_support': initial_support,
+            'final_support': global_best[0],
+            'steps': global_best[2],
+            'A_final': global_best[1],
+            'labels': labels,
+            'termination': {
+                'stop_reason': stop_reason,
+                'iterations': iterations,
+                'max_steps': max_steps,
+                'support_trajectory': best_support_trajectory,
+                'strict_beam': strict_beam,
+            },
+        }
+
+    def apply_rewrite_result(self, result, tol=1e-12):
+        """
+        Apply a rewrite search result back to the channel's Kraus operators.
+        Reconstructs Matrixsum objects from the final coefficient matrix.
+        
+        Args:
+            result: dict returned by rewrite_search().
+        Returns:
+            self (mutated in-place).
+        """
+        A_final = result['A_final']
+        labels = result['labels']
+        m, n = A_final.shape
+
+        new_kraus_ops = []
+        for i in range(m):
+            instances = []
+            for j in range(n):
+                val = A_final[i, j]
+                if abs(val) > tol:
+                    phase = val / abs(val)
+                    instances.append((PauliAtom(labels[j], phase=phase), abs(val)))
+            new_kraus_ops.append(Matrixsum(instances))
+
+        self.kraus_ops = new_kraus_ops
+        return self
+
+    # def unitary_transform(self, U: np.ndarray, indices: list):
+    #     """
+    #     Perform a general unitary transform over Kraus operator {K1, ... Kn}.
+    #     """
+    #     assert U.conj().T @ U == np.eye(U.shape[0]), "U must be unitary"
+    #     assert U.shape[0] == U.shape[1] == len(indices), "U must be square and match the number of indices"
+    #     assert max(indices) < len(self.kraus_ops), "Indices must be within the range of Kraus operators"
+
+    #     new_kraus_ops = [deepcopy(k) for k in self.kraus_ops]
+    #     for i in range(len(indices)):
+    #         new_op = Matrixsum([])
+    #         for j in range(len(indices)):
+    #             new_op = new_op.add(self.kraus_ops[indices[j]].mul_coeffs(U[i, j]))
+    #         new_kraus_ops[indices[i]] = new_op
+
+    #     self.kraus_ops = new_kraus_ops
 
 
 class channel_ensemble:
@@ -404,16 +926,27 @@ class channel_ensemble:
 
         
 if __name__ == "__main__":
-    A = -1j * np.array([[np.exp(-1j * np.pi/4),0],[0, np.exp(1j * np.pi/4)]])
-    pa1 = PauliAtom('XIZ', phase=1.0)
-    pa2 = PauliAtom('YIZ', phase=1.0j)
-    pa3 = PauliAtom('XZZ', phase=np.exp(1j * np.pi / 4))
-    pa4 = PauliAtom('XIZ', phase = 1.0j)
-    ms1 = Matrixsum([(pa1, 0.5), (pa2, 0.3), (pa4, 0.2)])
-    ms2 = Matrixsum([(pa3, 0.2)])
-    ms_mul = ms1.mul(ms2)
-    print(ms_mul.size)
-    print(ms_mul.operator_norm())
-    for inst, c in ms_mul.instances:
-        print(inst, c)
+    # A = -1j * np.array([[np.exp(-1j * np.pi/4),0],[0, np.exp(1j * np.pi/4)]])
+    # pa1 = PauliAtom('XIZ', phase=1.0)
+    # pa2 = PauliAtom('YIZ', phase=1.0j)
+    # pa3 = PauliAtom('XZZ', phase=np.exp(1j * np.pi / 4))
+    # pa4 = PauliAtom('XIZ', phase = 1.0j)
+    # ms1 = Matrixsum([(pa1, 0.5), (pa2, 0.3), (pa4, 0.2)])
+    # ms2 = Matrixsum([(pa3, 0.2)])
+    # ms_mul = ms1.mul(ms2)
+    # print(ms_mul.size)
+    # print(ms_mul.operator_norm())
+    # for inst, c in ms_mul.instances:
+    #     print(inst, c)
+    k1 = Matrixsum([(PauliAtom("XX", 1.0), 1.0), (PauliAtom("YY", 1.0), 1.0), (PauliAtom("ZZ", -1.0), 1.0)])
+    k2 = Matrixsum([(PauliAtom("XX", 1.0j), 1.0), (PauliAtom("YY", -1.0), 1.0), (PauliAtom("IZ", -1.0), 1.0)])
+    k3 = Matrixsum([(PauliAtom("XX", 1.0), 0.5), (PauliAtom("YY", 1.0), 1.3), (PauliAtom("ZZ", -1.0), 0.8)])
+    k4 = Matrixsum([(PauliAtom("XX", -1.0j), 1.0), (PauliAtom("YY", 1.0), 1.0), (PauliAtom("IZ", 1.0), 0.4)])
+    ch = channel([k1, k2, k3, k4])
     
+    print(ch._coeff_matrix()[0])
+    result = ch.rewrite_search(strategy='beam')
+    ch.apply_rewrite_result(result)
+    print(result)
+    print(ch.kraus_ops)
+ 
