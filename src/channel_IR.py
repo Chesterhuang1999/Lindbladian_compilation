@@ -499,6 +499,71 @@ class channel:
         """
         assert len(perm) == len(self.kraus_ops), "Permutation length must match number of Kraus operators"
         self.kraus_ops = [self.kraus_ops[i] for i in perm]
+
+    def _matrixsum_to_dense(self, op: Matrixsum, dim: int | None = None) -> np.ndarray:
+        """Convert one Kraus operator in Matrixsum form to a dense matrix."""
+        if dim is None:
+            if op.size > 0:
+                dim = 2 ** op.size
+            elif self.size is not None:
+                dim = 2 ** self.size
+            else:
+                raise ValueError("Cannot infer channel dimension from zero Kraus operators only")
+
+        dense = np.zeros((dim, dim), dtype=complex)
+        for inst, coeff in op.instances:
+            dense += coeff * inst.to_operator().data
+        return dense
+
+    def choi_matrix(self, normalized: bool = False) -> np.ndarray:
+        """
+        Construct the Choi matrix of the channel E(rho)=sum_i K_i rho K_i^dagger.
+
+        We use the column-stacking convention:
+            J(E) = sum_i |K_i>><<K_i|,  |K_i>> = vec(K_i)
+
+        Args:
+            normalized: If True, return J / d where d is system dimension.
+
+        Returns:
+            The Choi matrix as a dense complex ndarray of shape (d^2, d^2).
+        """
+        if self.size is None:
+            self.zero_elim()
+            if self.size is None and len(self.kraus_ops) > 0:
+                self.size = max(op.size for op in self.kraus_ops)
+            if self.size is None:
+                raise ValueError("Cannot construct Choi matrix for an empty channel")
+
+        dim = 2 ** self.size
+        choi = np.zeros((dim * dim, dim * dim), dtype=complex)
+
+        for op in self.kraus_ops:
+            K = self._matrixsum_to_dense(op, dim=dim)
+            vec_K = K.reshape(dim * dim, order='F')
+            choi += np.outer(vec_K, np.conj(vec_K))
+
+        if normalized:
+            choi = choi / dim
+
+        return choi
+
+    def choi_rank(self, tol: float = 1e-10, normalized: bool = False) -> int:
+        """
+        Compute the rank of the Choi matrix of this channel.
+
+        Args:
+            tol: Eigenvalue threshold for numerical rank.
+            normalized: Whether to compute rank from normalized Choi matrix J/d.
+
+        Returns:
+            Numerical rank as an integer.
+        """
+        choi = self.choi_matrix(normalized=normalized)
+        hermitian_choi = 0.5 * (choi + choi.conj().T)
+        eigvals = np.linalg.eigvalsh(hermitian_choi)
+        return int(np.sum(np.abs(eigvals) > tol))
+
     def two_kraus_unitary_transform(self):
         """
         Reshape the two Kraus operators K1, K2 into K1' = aK1 + bK2, K2' = -b^* K1 + a^*K2, where |a|^2 + |b|^2 = 1. 
@@ -557,118 +622,125 @@ class channel:
         return np.array([int(np.sum(np.abs(A[i]) > tol)) for i in range(A.shape[0])])
 
     @staticmethod
-    def _apply_givens(A, i, j, theta):
+    def _apply_unitary(A, i, j, U):
         """
-        Apply a Givens rotation to rows i, j of matrix A (in-place on a copy).
-        
-        The rotation is:  [cos(theta)  -sin(theta)] [row_i]
-                          [sin(theta)   cos(theta)] [row_j]
-        
+        Apply a 2x2 unitary U to rows i, j of matrix A (on a copy).
+
+        The row update is:
+            [A_i^new]   [U[0,0]  U[0,1]] [A_i]
+            [A_j^new] = [U[1,0]  U[1,1]] [A_j]
+
         Returns the new matrix.
         """
         B = A.copy()
-        c, s = np.cos(theta), np.sin(theta)
-        B[i] = c * A[i] - s * A[j]
-        B[j] = s * A[i] + c * A[j]
+        B[i] = U[0, 0] * A[i] + U[0, 1] * A[j]
+        B[j] = U[1, 0] * A[i] + U[1, 1] * A[j]
         return B
 
     @staticmethod
-    def _candidate_angles_for_pair(A, i, j, tol=1e-12, n_grid=0):
+    def _candidate_unitaries_for_pair(A, i, j, tol=1e-12):
         """
-        Generate candidate Givens rotation angles for row pair (i, j).
+        Generate candidate 2x2 unitaries for row pair (i, j).
 
-          Strategy:
-          1. For each column k where both A[i,k] and A[j,k] are nonzero,
-              if the ratio is (approximately) real, compute
-              theta = arctan(A[i,k] / A[j,k]) (zeros row i at col k)
-              and theta = arctan(-A[j,k] / A[i,k]) (zeros row j at col k).
-              For genuinely complex ratios, no exact real-theta cancellation exists.
-        2. For each column k where exactly one of A[i,k], A[j,k] is nonzero,
-           theta = 0 already preserves the zero structure.
-        3. Optionally add a coarse grid for exploration.
+        Parameterization (global-phase gauge a >= 0 real):
+            U = [[a,  -conj(b)],
+                 [b,   a      ]],   a in R_{>=0}, b in C, a^2 + |b|^2 = 1.
+
+        For each column k, two candidates are generated:
+          - U^{(i,k)} that zeros A_i^new[k] when |A[j,k]| > tol:
+                r  = |A[i,k]/A[j,k]|,
+                a  = 1/sqrt(1+r^2),
+                b  = a * conj(A[i,k]/A[j,k]).
+          - U^{(j,k)} that zeros A_j^new[k] when |A[i,k]| > tol:
+                r' = |A[j,k]/A[i,k]|,
+                a  = 1/sqrt(1+r'^2),
+                b  = -a * (A[j,k]/A[i,k]).
+
+        The identity is always included as a no-op candidate.
 
         Returns:
-            List of candidate angles in (-pi/2, pi/2].
+            List of 2x2 complex ndarrays.
         """
-        angles = {0.0}
+        unitaries = [np.eye(2, dtype=complex)]
         ri, rj = A[i], A[j]
-
-        def _add_real_ratio_angle(ratio):
-            if abs(np.imag(ratio)) <= tol * (1.0 + abs(np.real(ratio))):
-                angles.add(float(np.arctan(np.real(ratio))))
 
         for k in range(A.shape[1]):
             ai, aj = ri[k], rj[k]
-            # theta that zeros A_new[i, k]: tan(theta) = ai / aj
+
+            # Zero A_i^new[k]: bar(b)/a = ai/aj  =>  b = a * conj(ai/aj)
             if abs(aj) > tol:
-                _add_real_ratio_angle(ai / aj)
-            # theta that zeros A_new[j, k]: tan(theta) = -aj / ai
+                ratio = ai / aj
+                r = abs(ratio)
+                a = 1.0 / np.sqrt(1.0 + r * r)
+                b = a * np.conj(ratio)
+                U = np.array([[a, -np.conj(b)],
+                              [b,  a         ]], dtype=complex)
+                unitaries.append(U)
+
+            # Zero A_j^new[k]: b = -a * aj/ai
             if abs(ai) > tol:
-                _add_real_ratio_angle(-aj / ai)
+                ratio = aj / ai
+                r = abs(ratio)
+                a = 1.0 / np.sqrt(1.0 + r * r)
+                b = -a * ratio
+                U = np.array([[a, -np.conj(b)],
+                              [b,  a         ]], dtype=complex)
+                unitaries.append(U)
 
-        # Add grid angles for broader exploration (lightweight)
-        if n_grid > 0:
-            for g in np.linspace(-np.pi / 2, np.pi / 2, n_grid, endpoint=False):
-                angles.add(g)
-
-        return sorted(angles)
+        return unitaries
 
     @staticmethod
-    def _best_rotation_for_pair(A, i, j, tol=1e-12, n_grid=0):
+    def _best_unitary_for_pair(A, i, j, tol=1e-12):
         """
-        Find the best Givens rotation angle for pair (i, j).
+        Find the 2x2 unitary among the generated candidates that minimizes
+        the support on rows i and j.
 
-        The selection criterion only minimizes the support on the candidate pair
-        (rows i and j). For compatibility with existing callers, the returned
-        support is still the implied total support after the rotation.
-        
         Returns:
-            (best_theta, best_support, best_A)
+            (best_U, best_support, best_A)
         """
         row_supports = channel._row_supports(A, tol)
         old_pair_support = int(row_supports[i] + row_supports[j])
         total_support = int(np.sum(row_supports))
         unaffected_support = total_support - old_pair_support
-        candidates = channel._candidate_angles_for_pair(A, i, j, tol, n_grid)
+        candidates = channel._candidate_unitaries_for_pair(A, i, j, tol)
 
-        best_theta = 0.0
+        best_U = np.eye(2, dtype=complex)
         best_pair_support = old_pair_support
         best_support = total_support
         best_A = A
 
-        for theta in candidates:
-            B = channel._apply_givens(A, i, j, theta)
+        for U in candidates:
+            B = channel._apply_unitary(A, i, j, U)
             B[np.abs(B) < tol] = 0.0
             new_pair_support = int(np.sum(np.abs(B[i]) > tol) + np.sum(np.abs(B[j]) > tol))
             if new_pair_support < best_pair_support:
                 best_pair_support = new_pair_support
                 best_support = unaffected_support + new_pair_support
-                best_theta = theta
+                best_U = U
                 best_A = B
 
-        return best_theta, best_support, best_A
+        return best_U, best_support, best_A
 
     def rewrite_search(self, strategy='greedy', beam_width=3, max_steps=50,
-                       n_grid=0, tol=1e-12, verbose=False, strict_beam=False):
+                       tol=1e-12, verbose=False, strict_beam=False):
         """
-        Heuristic search for 2-level unitary rewrites that minimize total Pauli term count.
-        
+        Heuristic search for 2-row unitary rewrites that minimize total Pauli term count.
+
         Args:
             strategy: 'greedy' — always pick the best single-step improvement.
-                      'beam'   — keep top beam_width states and explore all pair rotations.
+                      'beam'   — keep top beam_width states and explore all pair unitaries.
             beam_width: Number of states to keep at each step (only for 'beam').
             max_steps: Maximum number of rewrite steps.
-            n_grid: Number of additional grid angles per pair (0 = analytical only).
             tol: Numerical tolerance.
             verbose: Print progress info.
             strict_beam: If True, beam only accepts strictly improving candidates.
                          If False, beam accepts no-worse candidates.
-            
+
         Returns:
             dict with keys:
                 'initial_support': int
                 'final_support': int
-                'steps': list of (pair, theta, support_after) tuples
+                'steps': list of ((i,j), U, support_after) tuples
                 'A_final': final coefficient matrix
                 'labels': Pauli labels
         """
@@ -677,7 +749,7 @@ class channel:
         initial_support = self._support(A, tol)
 
         if strategy == 'greedy':
-            return self._greedy_search(A, labels, m, initial_support, max_steps, n_grid, tol, verbose)
+            return self._greedy_search(A, labels, m, initial_support, max_steps, tol, verbose)
         elif strategy == 'beam':
             return self._beam_search(
                 A,
@@ -686,7 +758,6 @@ class channel:
                 initial_support,
                 beam_width,
                 max_steps,
-                n_grid,
                 tol,
                 verbose,
                 strict_beam,
@@ -694,10 +765,10 @@ class channel:
         else:
             raise ValueError(f"Unknown strategy: {strategy}")
 
-    def _greedy_search(self, A, labels, m, initial_support, max_steps, n_grid, tol, verbose):
+    def _greedy_search(self, A, labels, m, initial_support, max_steps, tol, verbose):
         """
-        Greedy: always apply the single best rotation.
-        
+        Greedy: always apply the single best 2-row unitary.
+
         Optimization: only compute support change for the two affected rows,
         rather than recomputing the entire matrix support each time.
         """
@@ -709,35 +780,29 @@ class channel:
 
         for step in range(max_steps):
             best_pair = None
-            best_theta = 0.0
+            best_U = np.eye(2, dtype=complex)
             best_delta = 0  # Change in support (negative means improvement)
 
-            # Pre-compute row supports for current matrix
             row_supports = self._row_supports(current_A, tol)
 
             for i, j in combinations(range(m), 2):
-                old_support_i = row_supports[i]
-                old_support_j = row_supports[j]
-                old_pair_support = old_support_i + old_support_j
+                old_pair_support = int(row_supports[i] + row_supports[j])
 
-                # Generate candidate angles for this pair
-                candidates = self._candidate_angles_for_pair(current_A, i, j, tol, n_grid)
+                candidates = self._candidate_unitaries_for_pair(current_A, i, j, tol)
 
-                for theta in candidates:
-                    # Apply rotation and compute new support only for rows i, j
-                    B_rotated = self._apply_givens(current_A, i, j, theta)
+                for U in candidates:
+                    B_rotated = self._apply_unitary(current_A, i, j, U)
                     B_rotated[np.abs(B_rotated) < tol] = 0.0
 
                     new_support_i = int(np.sum(np.abs(B_rotated[i]) > tol))
                     new_support_j = int(np.sum(np.abs(B_rotated[j]) > tol))
                     new_pair_support = new_support_i + new_support_j
 
-                    # Delta: change in support (negative is good)
                     delta = new_pair_support - old_pair_support
 
                     if delta < best_delta:
                         best_delta = delta
-                        best_theta = theta
+                        best_U = U
                         best_pair = (i, j)
 
             if best_pair is None or best_delta >= 0:
@@ -746,16 +811,15 @@ class channel:
                     print(f"  Step {step}: no improvement found, stopping.")
                 break
 
-            # Apply the best rotation
             i, j = best_pair
-            current_A = self._apply_givens(current_A, i, j, best_theta)
+            current_A = self._apply_unitary(current_A, i, j, best_U)
             current_A[np.abs(current_A) < tol] = 0.0
             current_support += best_delta
             support_trajectory.append(current_support)
 
-            steps.append((best_pair, best_theta, current_support))
+            steps.append((best_pair, best_U, current_support))
             if verbose:
-                print(f"  Step {step}: rotate pair {best_pair}, theta={best_theta:.6f}, "
+                print(f"  Step {step}: apply U on pair {best_pair}, "
                       f"delta={best_delta}, support={current_support}")
 
         return {
@@ -772,9 +836,9 @@ class channel:
             },
         }
 
-    def _beam_search(self, A, labels, m, initial_support, beam_width, max_steps, n_grid, tol, verbose, strict_beam):
+    def _beam_search(self, A, labels, m, initial_support, beam_width, max_steps, tol, verbose, strict_beam):
         """
-        Beam search: maintain top beam_width states, expand all pair rotations.
+        Beam search: maintain top beam_width states, expand all pair unitaries.
         Allows zero-gain steps to escape local minima.
         """
         # State: (support, A_matrix, steps_list)
@@ -790,10 +854,10 @@ class channel:
 
             for sup, state_A, state_steps in beam:
                 for i, j in combinations(range(m), 2):
-                    theta, new_sup, new_A = self._best_rotation_for_pair(state_A, i, j, tol, n_grid)
+                    U, new_sup, new_A = self._best_unitary_for_pair(state_A, i, j, tol)
                     # Accept policy for beam expansion.
                     if (strict_beam and new_sup < sup) or ((not strict_beam) and new_sup <= sup):
-                        new_steps = state_steps + [((i, j), theta, new_sup)]
+                        new_steps = state_steps + [((i, j), U, new_sup)]
                         candidates.append((new_sup, new_A, new_steps))
 
                         if new_sup < global_best[0]:
@@ -943,8 +1007,6 @@ if __name__ == "__main__":
     k3 = Matrixsum([(PauliAtom("XX", 1.0), 0.5), (PauliAtom("YY", 1.0), 1.3), (PauliAtom("ZZ", -1.0), 0.8)])
     k4 = Matrixsum([(PauliAtom("XX", -1.0j), 1.0), (PauliAtom("YY", 1.0), 1.0), (PauliAtom("IZ", 1.0), 0.4)])
     ch = channel([k1, k2, k3, k4])
-    
-    print(ch._coeff_matrix()[0])
     result = ch.rewrite_search(strategy='beam')
     ch.apply_rewrite_result(result)
     print(result)

@@ -53,7 +53,7 @@ def test_tfim_lcu_optimization(num_qubits: int) -> dict[str, dict[str, int]]:
     tfim_lind = Lindbladian(h_terms, l_terms)
     channel_lind, _, _ = Lindblad_to_channel(tfim_lind, delta_t)
     ms = channel_lind.channels[0][1][0]
-
+    print(ms)
     print(f"Test for case N = {num_qubits}:")
 
     block_encoding = BlockEncoding(ms)

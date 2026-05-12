@@ -912,7 +912,7 @@ class BlockEncoding:
         pauli_list = []
         phase_list = []
         zero_phase = 0.0
-        for i, ms in enumerate(self.mat_list):    
+        for i, ms in enumerate(self.mat_list):
             if isinstance(ms, tuple) or isinstance(ms, list):
                 pauli_op, coeff = ms
                 if pauli_op != 'I' * len(pauli_op): #type: ignore
@@ -934,7 +934,7 @@ class BlockEncoding:
 
         ## Pick up independent rows that serve as the basis
         selected_indices_z, maxcoverage_z, U_covered_z = greedy_generator_selection(sorted_matrix_x, w, w)
-        
+
         selected_indices_x, maxcoverage_x, U_covered_x = greedy_generator_selection(sorted_matrix_z, w, w)
 
         if maxcoverage_z > maxcoverage_x:
@@ -955,7 +955,7 @@ class BlockEncoding:
             remaining_tuple = [sorted_matrix_z[i] for i in list(remained_indices) if sorted_matrix_z[i].tobytes() not in U_covered]
 
         subspace_modes = assign_subspace_modes(w, selected_matrix, U_covered_new)
-        
+
         additional_modes = assign_additional_modes(w, subspace_modes, remaining_tuple)
         ## Keep an explicit identity slot aligned with self.mat_list terms.
         identity_label = None
@@ -1006,15 +1006,15 @@ class BlockEncoding:
                 coeff_mode = coeff_pool.pop(0)
             else:
                 coeff_mode = 0.0 + 0.0j
-           
+
             coeff_mode_dict[ctrl_value] = coeff_mode
-        
+
         self.coeff_mode_dict = coeff_mode_dict
         self.vec_phase_lookup = build_vec_phase_lookup(chosen_matrix, chosen_phases)
         self.basis_modes_with_phase, self.nonbasis_modes_with_phase = extract_basis_modes_with_phases(additional_modes, self.vec_phase_lookup, zero_phase)
-        
+
         self.mobius_phase_result = mobius_invert_modes_with_phases(w, additional_modes, self.vec_phase_lookup, zero_phase)
-        
+
         return coeff_mode_dict, w
     def mulplex_U_opt_order(self):
         sys_size = self.sys_size
@@ -1215,7 +1215,6 @@ class BlockEncoding:
         
         if opt == 'No':
             qc_u, tcount, mccount, cxcount = self.mulplex_U(self.mat_list, self.ctrl_size, self.sys_size)
-            print(tcount, mccount, cxcount)
             ctrl = QuantumRegister(self.ctrl_size, 'ctrl')
             sys = QuantumRegister(self.sys_size, 'sys')
             qc = QuantumCircuit(ctrl, sys)
