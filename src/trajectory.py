@@ -198,6 +198,7 @@ def reflection_op(qubit_size: int, proj_size: list):
     qc.h(proj_size[-1])
     qc.x(proj_size)
     return qc
+
 def oblivious_AA(qc_main:QuantumCircuit, qc_sub, qubit_regs):
     """ 
     Implement the oblivious amplitude amplification 

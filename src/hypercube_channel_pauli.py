@@ -212,31 +212,29 @@ def test_kraus_to_instruction(n: int = 3, seed: int = 7) -> None:
     """
     ensemble = build_hypercube_section52_channel(n)
     kraus_ops = ensemble.channels[0][1]
-    print(kraus_ops)
     kraus_mats = [kms.eff_op().to_matrix() for kms in kraus_ops]
 
     kraus_channel = Kraus(kraus_mats)  # type: ignore[arg-type]
     kraus_inst = kraus_channel.to_instruction()
-
     qc = QuantumCircuit(n, name=f"hypercube_kraus_n{n}")
     qc.append(kraus_inst, range(n))
 
     try:
-        tqc = transpile(qc,  optimization_level=0)
+        tqc = transpile(qc,  optimization_level=3, basis_gates=['cx', 'u3'])
         transpile_mode = "basis=[cx,u3], opt=0"
     except Exception as exc:
         # Some Qiskit versions cannot synthesize Kraus instruction into cx/u3 basis.
-        tqc = transpile(qc, optimization_level=0)
+        tqc = transpile(qc, optimization_level=3)
         transpile_mode = f"fallback-default(opt=0) due to {type(exc).__name__}"
     ops = {str(k): int(v) for k, v in tqc.count_ops().items()}
     rng = np.random.default_rng(seed)
     psi = rng.normal(size=2**n) + 1j * rng.normal(size=2**n)
     psi = psi / np.linalg.norm(psi)
     rho0 = np.outer(psi, np.conj(psi))
-
+    print(rho0)
     rho_target = _apply_channel_direct(kraus_ops, rho0)
     rho_target = rho_target / np.trace(rho_target)
-
+    
     # Sanity reference: quantum_info channel evolution should match direct Kraus sum.
     rho_qi = DensityMatrix(rho0).evolve(kraus_channel).data
 
@@ -245,7 +243,6 @@ def test_kraus_to_instruction(n: int = 3, seed: int = 7) -> None:
     qc_run.save_density_matrix(label="rho_out")  # type: ignore[attr-defined]
     result = sim.run(qc_run, initial_statevector=psi, shots=1).result().data(0)
     rho_sim = np.asarray(result["rho_out"], dtype=complex)
-
     td_direct_vs_qi = _trace_distance_density(rho_qi, rho_target)
     td_instruction_vs_direct = _trace_distance_density(rho_sim, rho_target)
     td_instruction_vs_qi = _trace_distance_density(rho_sim, rho_qi)
@@ -292,7 +289,6 @@ def test_stinespring_isometry(n: int = 3, seed: int = 7, tol: float = 1e-8) -> N
     # Use a non-optimizing decomposition for correctness validation.
     # tqc_validate = transpile(qc, basis_gates=['cx', 'u3'], optimization_level=0)
     print(end_compile - start)
-    exit(0)
     # Keep the more optimized circuit for resource reporting.
     tqc = transpile(qc, basis_gates=['cx', 'u3'], optimization_level=0)
     ops = {str(k): int(v) for k, v in tqc.count_ops().items()}

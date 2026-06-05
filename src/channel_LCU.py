@@ -233,7 +233,7 @@ def channel_to_LCU (ensem: channel_ensemble, structure = 'basic', opt = 'No') ->
             ctrl_value = bin(i)[2:].zfill(select_size)
             ctrl_v_rev = ctrl_value[::-1]
             qc_be_ms = BlockEncoding(ms).circuit(opt = opt)
-            print(qc_be_ms.draw())
+            # print(qc_be_ms.draw())
             ctrl_size_ms = qc_be_ms.num_qubits - sys_size
             # U_be_ms = qc_be_ms.to_gate().control(num_ctrl_qubits=select_size, ctrl_state=ctrl_value)
             U_be_ms = qc_be_ms.to_gate().control(num_ctrl_qubits=select_size, ctrl_state=ctrl_v_rev)
@@ -525,7 +525,7 @@ def simulate_circuit_opt(circuit: QuantumCircuit, ini_state: Statevector, qubit_
 
 if __name__ == "__main__":
    
-    test_case = 4
+    test_case = 2
 
     ### Test II: A simple Lindbladian 
     ### A transverse field Ising model Lindbladian
@@ -539,6 +539,7 @@ if __name__ == "__main__":
         channel_Lind, success_prob_th, coeff_sum = Lindblad_to_channel(TFIM_lind, delta_t)
         # print(success_prob_th)
         channel_Lind = channel_Lind.channels[0][1]
+        print(channel_Lind)
         ms = channel_Lind[0]
         H_qobj, L_qobj_list = construct_qobj_lind(TFIM_lind, dim_sys = 3)  
         
