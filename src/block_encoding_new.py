@@ -1296,27 +1296,16 @@ class BlockEncoding(_LegacyBlockEncoding):
         def _pauli_weight(label):
             return sum(1 for c in label if c != 'I')
 
-        def _build_candidate(k):
-            ## Stage I: greedy basis on both x-prior and z-prior sortings.
-            sel_z, cov_z, U_z = greedy_generator_selection(sorted_matrix_x, w, k)
-            sel_x, cov_x, U_x = greedy_generator_selection(sorted_matrix_z, w, k)
-
-            if cov_z > cov_x:
-                cand_matrix = sorted_matrix_x
-                cand_phases = phases_x
-                cand_selected = sorted_matrix_x[sel_z]
-                remained_indices = set(range(M)) - set(sel_z)
-                cand_U = U_z
-                cand_remaining = [sorted_matrix_x[i] for i in remained_indices
-                                  if sorted_matrix_x[i].tobytes() not in cand_U]
-            else:
-                cand_matrix = sorted_matrix_z
-                cand_phases = phases_z
-                cand_selected = sorted_matrix_z[sel_x]
-                remained_indices = set(range(M)) - set(sel_x)
-                cand_U = U_x
-                cand_remaining = [sorted_matrix_z[i] for i in remained_indices
-                                  if sorted_matrix_z[i].tobytes() not in cand_U]
+        def _build_candidate(k, crit, cand_matrix, cand_phases):
+            ## Stage I: keep the existing greedy basis selector, but do not
+            ## discard x/z ordering candidates by coverage before cost scoring.
+            sel, coverage, cand_U = greedy_generator_selection(cand_matrix, w, k)
+            cand_selected = cand_matrix[sel]
+            remained_indices = set(range(M)) - set(sel)
+            cand_remaining = [
+                cand_matrix[i] for i in remained_indices
+                if cand_matrix[i].tobytes() not in cand_U
+            ]
 
             ## Stages II/III: subspace + additional placement.
             subspace_modes = assign_subspace_modes(w, cand_selected, set(cand_U))
@@ -1354,6 +1343,8 @@ class BlockEncoding(_LegacyBlockEncoding):
 
             return {
                 'k': k,
+                'crit': crit,
+                'coverage': coverage,
                 'cost': cost,
                 'additional_modes': cand_additional,
                 'chosen_matrix': cand_matrix,
@@ -1367,15 +1358,26 @@ class BlockEncoding(_LegacyBlockEncoding):
         if w - 1 >= 1:
             candidate_ks.append(w - 1)
 
-        candidates = [_build_candidate(k) for k in candidate_ks]
+        candidate_sources = [
+            ('x', sorted_matrix_x, phases_x),
+            ('z', sorted_matrix_z, phases_z),
+        ]
+        candidates = [
+            _build_candidate(k, crit, cand_matrix, cand_phases)
+            for k in candidate_ks
+            for crit, cand_matrix, cand_phases in candidate_sources
+        ]
         ## Tie-break: prefer larger k (closer to legacy behaviour) on equal cost.
-        best = min(candidates, key=lambda c: (c['cost'], -c['k']))
+        best = min(candidates, key=lambda c: (c['cost'], -c['k'], -c['coverage'], c['crit']))
 
         additional_modes = best['additional_modes']
 
         self.additional_modes = additional_modes
-        self.candidate_costs = [(c['k'], c['cost']) for c in candidates]
+        self.candidate_costs = [
+            (c['crit'], c['k'], c['coverage'], c['cost']) for c in candidates
+        ]
         self.selected_k = best['k']
+        self.selected_crit = best['crit']
 
         ## Build coefficient list aligned with additional_modes order.
         coeff_pool_by_label = {}

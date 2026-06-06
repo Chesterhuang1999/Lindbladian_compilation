@@ -1041,6 +1041,7 @@ class BlockEncoding:
             ## Match qiskit's ctrl_state ordering in mulplex_U:
             ## rightmost bit in ctrl_value corresponds to lower-index control qubit.
             active_ctrls = [i for i, bit in enumerate(ctrl_value[::-1]) if bit == '1']
+            pauli_weight = sum(1 for ch in pauli_label if ch != 'I')
             if len(active_ctrls) == 0:
                 qc_u.append(qc_pauli.to_gate(), list(range(ctrl_size, ctrl_size + sys_size))) 
             else:
@@ -1048,9 +1049,9 @@ class BlockEncoding:
                 qargs = active_ctrls + list(range(ctrl_size, ctrl_size + sys_size))
                 qc_u.append(ctrl_U_elem, qargs)
                 if len(active_ctrls) == 1:
-                    cxcount += 1
+                    cxcount += pauli_weight
                 else:
-                    mccount += len(active_ctrls) - 1
+                    mccount += (len(active_ctrls) - 1) * pauli_weight
 
         tcount = mccount * 4
         cxcount += mccount * 4
@@ -1385,4 +1386,3 @@ if __name__ == "__main__":
     qc_opt_line = J.circuit(opt = 'Ctrl-line')
     print(qc_opt_line.draw())
     qc_no = J.circuit(opt = 'No')
-
