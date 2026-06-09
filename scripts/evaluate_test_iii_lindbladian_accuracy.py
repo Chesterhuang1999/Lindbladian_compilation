@@ -8,6 +8,7 @@ from pathlib import Path
 import numpy as np
 
 from evaluate_common import (
+    DATA_DIR,
     RESULTS_DIR,
     Lindblad_to_channel,
     Lindbladian,
@@ -15,6 +16,8 @@ from evaluate_common import (
     channel_ensemble,
     channel_to_LCU,
     construct_qobj_lind,
+    export_openqasm3_baseline,
+    remove_save_instructions,
     simulate_circuit,
     simulate_lindblad,
 )
@@ -79,6 +82,37 @@ def simulate_case_lcu_vs_baseline(num_qubits, delta_t_values, gamma):
             )
 
     return result
+
+
+def build_lindbladian_accuracy_baseline_circuit(
+    num_qubits: int,
+    delta_t: float = 0.1,
+    gamma: float | None = None,
+):
+    if gamma is None:
+        gamma = np.sqrt(0.1) / 2
+    h_terms, l_terms = build_periodic_tfim_lindbladian_pauli(num_qubits, gamma)
+    tfim_lind = Lindbladian(h_terms, l_terms)
+    channel_lind, _, _ = Lindblad_to_channel(tfim_lind, float(delta_t))
+    channel_lind = channel_lind.channels[0][1]
+    qc, _ = channel_to_LCU(channel_ensemble([channel_lind]), structure="basic", opt="No")
+    return remove_save_instructions(qc)
+
+
+def export_lindbladian_accuracy_baseline_openqasm3(
+    num_qubits: int = 4,
+    delta_t: float = 0.1,
+    gamma: float | None = None,
+    out_path=None,
+) -> dict[str, object]:
+    if out_path is None:
+        out_path = DATA_DIR / f"evaluate_test_iii_lindbladian_lcu_no_n{num_qubits}_baseline.qasm"
+    qc = build_lindbladian_accuracy_baseline_circuit(
+        num_qubits,
+        delta_t=delta_t,
+        gamma=gamma,
+    )
+    return export_openqasm3_baseline(qc, out_path)
 
 
 def plot_error_rates(n_list, delta_t_rec, error_rate, pauli_bound):

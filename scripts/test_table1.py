@@ -15,6 +15,10 @@ if str(SRC_DIR) not in sys.path:
 from block_encoding import BlockEncoding
 from channel_IR import Lindbladian
 from channel_LCU import Lindblad_to_channel
+from qasm_export import export_openqasm3_baseline
+
+
+DATA_DIR = ROOT / "circuits"
 
 
 def _count_metrics(qc: QuantumCircuit) -> dict[str, int]:
@@ -105,10 +109,96 @@ def test_tfim_lcu_optimization(num_qubits: int) -> dict[str, dict[str, int]]:
     return all_metrics
 
 
+def _build_tfim_lcu_matrixsum(
+    num_qubits: int,
+    delta_t: float = 0.1,
+):
+    h_terms = []
+    l_terms = []
+    gamma = np.sqrt(0.1) / 2
+
+    for i in range(num_qubits):
+        z_ind = [i, (i + 1) % num_qubits]
+        z_str = "".join("Z" if j in z_ind else "I" for j in range(num_qubits))
+        x_str = "".join("X" if j == i else "I" for j in range(num_qubits))
+        y_str = "".join("Y" if j == i else "I" for j in range(num_qubits))
+        h_terms.append((z_str, -1))
+        h_terms.append((x_str, -1))
+        l_terms.append([(x_str, gamma), (y_str, -1j * gamma)])
+
+    tfim_lind = Lindbladian(h_terms, l_terms)
+    channel_lind, _, _ = Lindblad_to_channel(tfim_lind, delta_t)
+    return channel_lind.channels[0][1][0]
+
+
+def build_tfim_lcu_block_encoding_circuit(
+    num_qubits: int,
+    metrics: str = "m_no",
+    delta_t: float = 0.1,
+) -> QuantumCircuit:
+    ms = _build_tfim_lcu_matrixsum(num_qubits, delta_t=delta_t)
+
+    if metrics == "m_no":
+        return BlockEncoding(ms).circuit(opt="No")
+    if metrics == "m_ctrl_line":
+        return BlockEncoding(ms).circuit(opt="Ctrl-line")
+    if metrics == "m_matrix_order":
+        return BlockEncoding(ms).circuit(opt="Matrix-order")
+    if metrics != "m_pauli":
+        raise ValueError(
+            "Unsupported metrics="
+            f"{metrics!r}; choose one of "
+            "['m_no', 'm_ctrl_line', 'm_matrix_order', 'm_pauli']."
+        )
+
+    num_qubits = int(num_qubits)
+    qc_pauli = QuantumCircuit(2 * num_qubits + 1)
+    for i in range(num_qubits):
+        qc_pauli.p(np.pi, i)
+        qc_pauli.cz(i, i + num_qubits + 1)
+
+    for i in range(num_qubits):
+        qc_pauli.cp(np.pi, i, num_qubits)
+        ccy = YGate().control(num_ctrl_qubits=2, ctrl_state="11")
+        qc_pauli.append(ccy, [i, num_qubits, i + num_qubits + 1])
+
+    return qc_pauli
+
+
+def build_tfim_lcu_block_encoding_circuits(
+    num_qubits: int,
+    delta_t: float = 0.1,
+) -> dict[str, QuantumCircuit]:
+    return {
+        metrics: build_tfim_lcu_block_encoding_circuit(
+            num_qubits,
+            metrics=metrics,
+            delta_t=delta_t,
+        )
+        for metrics in ("m_no", "m_ctrl_line", "m_matrix_order", "m_pauli")
+    }
+
+
+def export_tfim_lcu_baseline_openqasm3(
+    num_qubits: int = 4,
+    metrics: str = "m_no",
+    out_path: str | Path | None = None,
+    delta_t: float = 0.1,
+) -> dict[str, object]:
+    if out_path is None:
+        out_path = DATA_DIR / f"test_table1_{metrics}_n{num_qubits}_baseline.qasm"
+    qc = build_tfim_lcu_block_encoding_circuit(
+        num_qubits,
+        metrics=metrics,
+        delta_t=delta_t,
+    )
+    return export_openqasm3_baseline(qc, out_path)
+
+
 def main() -> None:
     for num_qubits in range(4, 20, 4):
         test_tfim_lcu_optimization(num_qubits)
 
 
 if __name__ == "__main__":
-    main()
+    print(export_tfim_lcu_baseline_openqasm3(num_qubits=4, metrics="m_no"))

@@ -11,12 +11,14 @@ from qiskit.circuit.library import YGate
 
 from evaluate_common import (
     BlockEncoding,
+    DATA_DIR,
     Lindblad_to_channel,
     Lindbladian,
     Matrixsum,
     PauliAtom,
     build_periodic_tfim_lindbladian_pauli,
     count_metrics,
+    export_openqasm3_baseline,
     ratio,
 )
 
@@ -59,6 +61,26 @@ def test_tfim_lcu_optimization(num_qubits: int, delta_t: float = 0.1):
         )
     print("-----------------------------")
     return metrics
+
+
+def build_tfim_lcu_baseline_circuit(num_qubits: int, delta_t: float = 0.1):
+    gamma = np.sqrt(0.1) / 2
+    h_terms, l_terms = build_periodic_tfim_lindbladian_pauli(num_qubits, gamma)
+    tfim_lind = Lindbladian(h_terms, l_terms)
+    channel_lind, _, _ = Lindblad_to_channel(tfim_lind, delta_t)
+    ms = channel_lind.channels[0][1][0]
+    return BlockEncoding(ms).circuit(opt="No")
+
+
+def export_tfim_lcu_baseline_openqasm3(
+    num_qubits: int = 4,
+    delta_t: float = 0.1,
+    out_path=None,
+) -> dict[str, object]:
+    if out_path is None:
+        out_path = DATA_DIR / f"evaluate_test_i_tfim_lcu_no_n{num_qubits}_baseline.qasm"
+    qc = build_tfim_lcu_baseline_circuit(num_qubits, delta_t=delta_t)
+    return export_openqasm3_baseline(qc, out_path)
 
 
 def test_tfim_lcu_legacy_counts(num_qubits: int, delta_t: float = 0.1):
@@ -143,6 +165,18 @@ def run_random_pauli_matrixsum_metrics(ms: Matrixsum, num_qubits: int):
     return metrics
 
 
+def export_random_pauli_matrixsum_baseline_openqasm3(
+    num_qubits: int = 4,
+    seed: int = 20260314,
+    out_path=None,
+) -> dict[str, object]:
+    if out_path is None:
+        out_path = DATA_DIR / f"evaluate_test_i_random_pauli_no_n{num_qubits}_baseline.qasm"
+    ms = build_random_pauli_matrixsum(num_qubits, seed=seed)
+    qc = BlockEncoding(ms).circuit(opt="No")
+    return export_openqasm3_baseline(qc, out_path)
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--tfim-n", type=int, nargs="*", default=[4, 8, 12, 16])
@@ -172,4 +206,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-

@@ -17,10 +17,12 @@ from scipy.special import jv
 
 from evaluate_common import (
     BlockEncoding,
+    DATA_DIR,
     Lindbladian,
     Matrixsum,
     RESULTS_DIR,
     count_1q2q_gates,
+    export_openqasm3_baseline,
     nested_commutator,
     qdrift_hamiltonian,
     qsvt_Hamiltonian,
@@ -116,6 +118,24 @@ def run_jacobi_anger_lcu_toy(degrees=(4, 6, 8, 10, 12, 14, 16, 18, 20, 22), thet
         "lcu_cx": cx_count_lcu,
         "lcu_u3": u3_count_lcu,
     }
+
+
+def build_jacobi_anger_lcu_baseline_circuit(degree: int = 4, theta: float = 7.0):
+    h_terms = [("X", 1.0), ("Y", 1.0), ("Z", 1.0)]
+    h_eff = Lindbladian(h_terms, []).H
+    lcu_ms = jacobi_anger_trig_matrixsum(h_eff, degree=degree, theta=theta)
+    return BlockEncoding(lcu_ms).circuit(opt="No")
+
+
+def export_jacobi_anger_lcu_baseline_openqasm3(
+    degree: int = 4,
+    theta: float = 7.0,
+    out_path=None,
+) -> dict[str, object]:
+    if out_path is None:
+        out_path = DATA_DIR / f"evaluate_test_v_jacobi_anger_lcu_no_deg{degree}_baseline.qasm"
+    qc = build_jacobi_anger_lcu_baseline_circuit(degree=degree, theta=theta)
+    return export_openqasm3_baseline(qc, out_path)
 
 
 def candidate_pool_cond_random_oplist(num_qubits: int):
@@ -282,6 +302,36 @@ def build_qsvt_single(h_op: Matrixsum, degree: int):
         "placeholder_ops_sin": dict(sin_ops),
     }
     return gate_details, count2q, count1q
+
+
+def build_qsvt_paulihedral_baseline_circuit(
+    num_qubits: int = 4,
+    degree: int = 4,
+    seed: int = 100,
+):
+    num_terms = min(5 * num_qubits**2, int(4**num_qubits))
+    if num_qubits == 4:
+        num_terms = 19
+    pauli_terms = gene_cond_random_oplist(num_qubits, num_terms, seed=seed + num_qubits)
+    h_ms = Lindbladian(pauli_terms, []).H
+    _, qc, _ = qsvt_Hamiltonian(h_ms, 0.1, deg=degree, opt="No")
+    return qc
+
+
+def export_qsvt_paulihedral_baseline_openqasm3(
+    num_qubits: int = 4,
+    degree: int = 4,
+    seed: int = 100,
+    out_path=None,
+) -> dict[str, object]:
+    if out_path is None:
+        out_path = DATA_DIR / f"evaluate_test_v_qsvt_no_n{num_qubits}_deg{degree}_baseline.qasm"
+    qc = build_qsvt_paulihedral_baseline_circuit(
+        num_qubits=num_qubits,
+        degree=degree,
+        seed=seed,
+    )
+    return export_openqasm3_baseline(qc, out_path)
 
 
 def paulihedral_gate_counts(nq_list=(4, 6, 8, 10), seed_base=571):

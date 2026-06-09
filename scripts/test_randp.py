@@ -4,6 +4,7 @@ import argparse
 import os
 import sys
 import tempfile
+import time
 from itertools import product
 from pathlib import Path
 
@@ -24,9 +25,11 @@ if str(SRC_DIR) not in sys.path:
 
 from block_encoding_new import BlockEncoding
 from channel_IR import Matrixsum, PauliAtom
+from qasm_export import export_openqasm3_baseline
 
 
-DEFAULT_QUBITS = (4, 8, 10)
+DATA_DIR = ROOT / "Data"
+DEFAULT_QUBITS = (4, 6, 8, 10)
 DEFAULT_OPTS = ("No", "Ctrl-line", "Matrix-order")
 BLOCK_ENCODING_IMPL = "block_encoding_new.BlockEncoding"
 
@@ -109,15 +112,27 @@ def _compile_matrixsum(
     optimization_level: int,
 ) -> dict[str, int]:
     be = BlockEncoding(ms)
+    start = time.time()
     qc = be.circuit(opt=opt)
+    build_time = time.time() - start
     metrics = _count_metrics(qc, basis_gates=basis_gates, optimization_level=optimization_level)
     metrics.update(
         {
             "tcount": int(getattr(be, "tcount", 0)),
             "mccount": int(getattr(be, "mccount", 0)),
             "cxcount": int(getattr(be, "cxcount", 0)),
+            "build_time": float(build_time),
         }
     )
+    if opt == "Matrix-order":
+        placement_debug = getattr(be, "placement_search_debug", {})
+        metrics.update(
+            {
+                "placement_cost": int(placement_debug.get("best_cost", -1)),
+                "padding_count": int(placement_debug.get("padding_count", 0)),
+                "refinement_skipped": bool(placement_debug.get("refinement_skipped", False)),
+            }
+        )
     return metrics
 
 
@@ -267,13 +282,32 @@ def run_random_pauli_case(
             f"({opt}): qubits={values['num_qubits']}, depth={values['depth']}, "
             f"size={values['size']}, cx={values['cx']}, u3={values['u3']}, "
             f"tcount={values['tcount']}, mccount={values['mccount']}, "
-            f"cxcount={values['cxcount']}{ratio_text}"
+            f"cxcount={values['cxcount']}, build_time={values['build_time']:.3f}s"
+            f"{ratio_text}"
         )
+        if opt == "Matrix-order":
+            print(
+                f"  Matrix-order placement: cost={values.get('placement_cost')}, "
+                f"padding_count={values.get('padding_count')}, "
+                f"refinement_skipped={values.get('refinement_skipped')}"
+            )
 
     print("-----------------------------")
     if show_matrix_order_ops:
         describe_matrix_order_controlled_paulis(ms, max_rows=matrix_order_ops_limit)
     return all_metrics
+
+
+def export_random_pauli_baseline_openqasm3(
+    num_qubits: int = 4,
+    seed: int = 20260314,
+    out_path: str | Path | None = None,
+) -> dict[str, object]:
+    if out_path is None:
+        out_path = DATA_DIR / f"test_randp_random_pauli_no_n{num_qubits}_baseline.qasm"
+    ms = build_random_pauli_matrixsum(num_qubits=num_qubits, seed=seed)
+    qc = BlockEncoding(ms).circuit(opt="No")
+    return export_openqasm3_baseline(qc, out_path)
 
 
 def main() -> None:

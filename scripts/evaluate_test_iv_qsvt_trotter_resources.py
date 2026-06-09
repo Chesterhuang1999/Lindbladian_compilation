@@ -12,7 +12,9 @@ from scipy.linalg import expm
 from scipy.special import jv
 
 from evaluate_common import (
+    DATA_DIR,
     Lindbladian,
+    export_openqasm3_baseline,
     gate_count_summary,
     nested_commutator,
     normalize,
@@ -106,6 +108,45 @@ def run_fixed_n_random_resource_comparison(
         "qsvt_matrix_order": qsvt_gate_count_set,
         "qsvt_no": qsvt_gate_count_set_old,
     }
+
+
+def build_qsvt_resource_baseline_circuit(
+    num_qubits: int = 3,
+    num_terms: int = 6,
+    delta_t: float = 0.1,
+    degree: int = 4,
+    seed: int = 20260314,
+):
+    random_pauli = random_pauli_list(
+        num_qubits=num_qubits,
+        size=num_terms,
+        phase=False,
+        seed=seed,
+    )
+    h_terms = [(ms.to_label(), -1.0) for ms in random_pauli]
+    random_lind = Lindbladian(h_terms, [])
+    _, qc, _ = qsvt_Hamiltonian(random_lind.H, delta_t, deg=degree, opt="No")
+    return qc
+
+
+def export_qsvt_resource_baseline_openqasm3(
+    num_qubits: int = 3,
+    num_terms: int = 6,
+    delta_t: float = 0.1,
+    degree: int = 4,
+    seed: int = 20260314,
+    out_path=None,
+) -> dict[str, object]:
+    if out_path is None:
+        out_path = DATA_DIR / f"evaluate_test_iv_qsvt_no_n{num_qubits}_baseline.qasm"
+    qc = build_qsvt_resource_baseline_circuit(
+        num_qubits=num_qubits,
+        num_terms=num_terms,
+        delta_t=delta_t,
+        degree=degree,
+        seed=seed,
+    )
+    return export_openqasm3_baseline(qc, out_path)
 
 
 def run_averaged_gate_counts(
@@ -237,4 +278,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-

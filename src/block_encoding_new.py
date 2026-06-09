@@ -12,7 +12,7 @@ from __future__ import annotations
 import numpy as np
 from qiskit import QuantumCircuit, QuantumRegister
 from qiskit.circuit.controlledgate import ControlledGate
-from qiskit.quantum_info import PauliList
+from qiskit.quantum_info import Pauli, PauliList
 
 from block_encoding import (
     BlockEncoding as _LegacyBlockEncoding,
@@ -24,6 +24,12 @@ from block_encoding import (
     extract_basis_modes_with_phases,
     mobius_invert_modes_with_phases,
 )
+from placement_search import search_for_pauli_placement
+
+
+def _pauli_label_to_symplectic_vector(label: str) -> np.ndarray:
+    pauli = Pauli(label)
+    return np.hstack((pauli.x.astype(int), pauli.z.astype(int))).astype(int)
 
 
 def _ctrl_state_bits(gate: ControlledGate) -> str:
@@ -1278,10 +1284,6 @@ class BlockEncoding(_LegacyBlockEncoding):
         symplectic_matrix = np.hstack((x_part, z_part)).astype(int)
         phase_array = np.array([2 * np.angle(phase) / np.pi for phase in phase_list])
 
-        sorted_matrix_z, phases_z = sort_symplectic_matrix(symplectic_matrix, phase_array, crit='z')
-        sorted_matrix_x, phases_x = sort_symplectic_matrix(symplectic_matrix, phase_array, crit='x')
-
-        M = sorted_matrix_z.shape[0]
         w = int(np.ceil(np.log2(len(self.coeff_list))))
 
         identity_label = None
@@ -1296,88 +1298,168 @@ class BlockEncoding(_LegacyBlockEncoding):
         def _pauli_weight(label):
             return sum(1 for c in label if c != 'I')
 
-        def _build_candidate(k, crit, cand_matrix, cand_phases):
-            ## Stage I: keep the existing greedy basis selector, but do not
-            ## discard x/z ordering candidates by coverage before cost scoring.
-            sel, coverage, cand_U = greedy_generator_selection(cand_matrix, w, k)
-            cand_selected = cand_matrix[sel]
-            remained_indices = set(range(M)) - set(sel)
-            cand_remaining = [
-                cand_matrix[i] for i in remained_indices
-                if cand_matrix[i].tobytes() not in cand_U
+        def _legacy_four_way_selection():
+            ## Previous implementation retained for comparison/debugging.  The
+            ## active path below uses placement_search instead of choosing among
+            ## x/z and k={w,w-1} candidates.
+            sorted_matrix_z, phases_z = sort_symplectic_matrix(symplectic_matrix, phase_array, crit='z')
+            sorted_matrix_x, phases_x = sort_symplectic_matrix(symplectic_matrix, phase_array, crit='x')
+            M = sorted_matrix_z.shape[0]
+
+            def _build_candidate(k, crit, cand_matrix, cand_phases):
+                ## Stage I: keep the existing greedy basis selector, but do not
+                ## discard x/z ordering candidates by coverage before cost scoring.
+                sel, coverage, cand_U = greedy_generator_selection(cand_matrix, w, k)
+                cand_selected = cand_matrix[sel]
+                remained_indices = set(range(M)) - set(sel)
+                cand_remaining = [
+                    cand_matrix[i] for i in remained_indices
+                    if cand_matrix[i].tobytes() not in cand_U
+                ]
+
+                ## Stages II/III: subspace + additional placement.
+                subspace_modes = assign_subspace_modes(w, cand_selected, set(cand_U))
+                cand_additional = assign_additional_modes(w, subspace_modes, cand_remaining)
+
+                ## Identity handling: keep an explicit identity slot at ctrl = 0...0.
+                if identity_label is not None:
+                    zero_ctrl = '0' * w
+                    used_ctrl_ids = {ctrl for _, ctrl in cand_additional}
+                    zero_idx = next((i for i, (_, c) in enumerate(cand_additional) if c == zero_ctrl), None)
+                    if zero_idx is None:
+                        cand_additional.append((identity_label, zero_ctrl))
+                    else:
+                        old_label, _ = cand_additional[zero_idx]
+                        if old_label != identity_label:
+                            displaced_mode = cand_additional[zero_idx]
+                            new_ctrl = None
+                            for ctrl_int in range(2 ** w):
+                                candidate = bin(ctrl_int)[2:].zfill(w)
+                                if candidate not in used_ctrl_ids:
+                                    new_ctrl = candidate
+                                    break
+                            cand_additional[zero_idx] = (identity_label, zero_ctrl)
+                            if new_ctrl is not None:
+                                cand_additional.append((displaced_mode[0], new_ctrl))
+                cand_additional = sorted(cand_additional, key=lambda x: int(x[1], 2))
+
+                ## Möbius inversion gives g_l. Cost C = Σ w(ctrl) · w_s(g_l).
+                cand_vec_phase_lookup = build_vec_phase_lookup(cand_matrix, cand_phases)
+                cand_mobius = mobius_invert_modes_with_phases(
+                    w, cand_additional, cand_vec_phase_lookup, zero_phase
+                )
+                g_modes = cand_mobius['g_modes_with_phase']
+                cost = sum(ctrl.count('1') * _pauli_weight(label) for label, ctrl, _ in g_modes)
+
+                return {
+                    'k': k,
+                    'crit': crit,
+                    'coverage': coverage,
+                    'cost': cost,
+                    'additional_modes': cand_additional,
+                    'chosen_matrix': cand_matrix,
+                    'chosen_phases': cand_phases,
+                    'vec_phase_lookup': cand_vec_phase_lookup,
+                    'mobius_result': cand_mobius,
+                }
+
+            ## Two candidates: k = w and k = w - 1 (skip when w-1 < 1).
+            candidate_ks = [w]
+            if w - 1 >= 1:
+                candidate_ks.append(w - 1)
+
+            candidate_sources = [
+                ('x', sorted_matrix_x, phases_x),
+                ('z', sorted_matrix_z, phases_z),
             ]
+            candidates = [
+                _build_candidate(k, crit, cand_matrix, cand_phases)
+                for k in candidate_ks
+                for crit, cand_matrix, cand_phases in candidate_sources
+            ]
+            ## Tie-break: prefer larger k (closer to legacy behaviour) on equal cost.
+            best = min(candidates, key=lambda c: (c['cost'], -c['k'], -c['coverage'], c['crit']))
+            return best, candidates
 
-            ## Stages II/III: subspace + additional placement.
-            subspace_modes = assign_subspace_modes(w, cand_selected, set(cand_U))
-            cand_additional = assign_additional_modes(w, subspace_modes, cand_remaining)
-
-            ## Identity handling: keep an explicit identity slot at ctrl = 0...0.
-            if identity_label is not None:
-                zero_ctrl = '0' * w
-                used_ctrl_ids = {ctrl for _, ctrl in cand_additional}
-                zero_idx = next((i for i, (_, c) in enumerate(cand_additional) if c == zero_ctrl), None)
-                if zero_idx is None:
-                    cand_additional.append((identity_label, zero_ctrl))
-                else:
-                    old_label, _ = cand_additional[zero_idx]
-                    if old_label != identity_label:
-                        displaced_mode = cand_additional[zero_idx]
-                        new_ctrl = None
-                        for ctrl_int in range(2 ** w):
-                            candidate = bin(ctrl_int)[2:].zfill(w)
-                            if candidate not in used_ctrl_ids:
-                                new_ctrl = candidate
-                                break
-                        cand_additional[zero_idx] = (identity_label, zero_ctrl)
-                        if new_ctrl is not None:
-                            cand_additional.append((displaced_mode[0], new_ctrl))
-            cand_additional = sorted(cand_additional, key=lambda x: int(x[1], 2))
-
-            ## Möbius inversion gives g_l. Cost C = Σ w(ctrl) · w_s(g_l).
-            cand_vec_phase_lookup = build_vec_phase_lookup(cand_matrix, cand_phases)
-            cand_mobius = mobius_invert_modes_with_phases(
-                w, cand_additional, cand_vec_phase_lookup, zero_phase
-            )
-            g_modes = cand_mobius['g_modes_with_phase']
-            cost = sum(ctrl.count('1') * _pauli_weight(label) for label, ctrl, _ in g_modes)
-
-            return {
-                'k': k,
-                'crit': crit,
-                'coverage': coverage,
-                'cost': cost,
-                'additional_modes': cand_additional,
-                'chosen_matrix': cand_matrix,
-                'chosen_phases': cand_phases,
-                'vec_phase_lookup': cand_vec_phase_lookup,
-                'mobius_result': cand_mobius,
+        allow_zero_address = identity_label is None and len(pauli_list) > (2 ** w - 1)
+        padding_to_full_address = (
+            not allow_zero_address
+            and identity_label is None
+            and len(pauli_list) < (2 ** w - 1)
+        )
+        is_full_address = (
+            not allow_zero_address
+            and (len(pauli_list) == (2 ** w - 1) or padding_to_full_address)
+        )
+        real_pauli_count = len(pauli_list)
+        if real_pauli_count <= 256:
+            search_profile = {
+                "beam_width": 16,
+                "layer_candidate_limit": 16,
+                "max_exact_layer_assignments": 16,
+                "mixed_initial_beam_width": 128,
+                "mixed_low_weight_count": 128,
+                "mixed_random_count": 256,
+                "future_exact_address_limit": 8,
             }
-
-        ## Two candidates: k = w and k = w - 1 (skip when w-1 < 1).
-        candidate_ks = [w]
-        if w - 1 >= 1:
-            candidate_ks.append(w - 1)
-
-        candidate_sources = [
-            ('x', sorted_matrix_x, phases_x),
-            ('z', sorted_matrix_z, phases_z),
-        ]
-        candidates = [
-            _build_candidate(k, crit, cand_matrix, cand_phases)
-            for k in candidate_ks
-            for crit, cand_matrix, cand_phases in candidate_sources
-        ]
-        ## Tie-break: prefer larger k (closer to legacy behaviour) on equal cost.
-        best = min(candidates, key=lambda c: (c['cost'], -c['k'], -c['coverage'], c['crit']))
-
-        additional_modes = best['additional_modes']
+        else:
+            search_profile = {
+                "beam_width": 16,
+                "layer_candidate_limit": 16,
+                "max_exact_layer_assignments": 16,
+                "mixed_initial_beam_width": 32,
+                "mixed_low_weight_count": 32,
+                "mixed_random_count": 64,
+                "future_exact_address_limit": 8,
+            }
+        additional_modes, placement_debug = search_for_pauli_placement(
+            self.J,
+            m=w,
+            beam_width=search_profile["beam_width"],
+            layer_candidate_limit=search_profile["layer_candidate_limit"],
+            max_exact_layer_assignments=search_profile["max_exact_layer_assignments"],
+            future_exact_address_limit=search_profile["future_exact_address_limit"],
+            initial_strategy="mixed",
+            mixed_full_initial_beam_width=search_profile["mixed_initial_beam_width"],
+            mixed_nonfull_initial_beam_width=search_profile["mixed_initial_beam_width"],
+            mixed_low_weight_count=search_profile["mixed_low_weight_count"],
+            mixed_random_count=search_profile["mixed_random_count"],
+            swap_refinement=True,
+            swap_refinement_max_terms=16,
+            padding_to_full_address=padding_to_full_address,
+            allow_zero_address=allow_zero_address,
+            return_debug=True,
+        )
+        placement_debug["search_profile"] = search_profile
+        if placement_debug.get("padding_count", 0) > 0:
+            additional_modes = placement_debug["padded_placement"]
+        additional_modes = sorted(additional_modes, key=lambda x: int(x[1], 2))
+        vec_phase_lookup = build_vec_phase_lookup(symplectic_matrix, phase_array)
+        for padding_label in placement_debug.get("padding_labels", []):
+            padding_vec = _pauli_label_to_symplectic_vector(padding_label)
+            vec_phase_lookup.setdefault(padding_vec.tobytes(), 0.0)
+        mobius_result = mobius_invert_modes_with_phases(
+            w, additional_modes, vec_phase_lookup, zero_phase
+        )
+        g_modes = mobius_result['g_modes_with_phase']
+        final_cost = sum(ctrl.count('1') * _pauli_weight(label) for label, ctrl, _ in g_modes)
 
         self.additional_modes = additional_modes
         self.candidate_costs = [
-            (c['crit'], c['k'], c['coverage'], c['cost']) for c in candidates
+            (
+                'placement-search',
+                placement_debug.get('initial_strategy'),
+                placement_debug.get('pre_refinement_cost'),
+                placement_debug.get('best_cost'),
+                placement_debug.get('padded_search_cost'),
+                final_cost,
+                placement_debug.get('padding_count'),
+                search_profile,
+            )
         ]
-        self.selected_k = best['k']
-        self.selected_crit = best['crit']
+        self.selected_k = w
+        self.selected_crit = 'mixed-placement-search'
+        self.placement_search_debug = placement_debug
 
         ## Build coefficient list aligned with additional_modes order.
         coeff_pool_by_label = {}
@@ -1398,11 +1480,11 @@ class BlockEncoding(_LegacyBlockEncoding):
             coeff_mode_dict[ctrl_value] = coeff_mode
 
         self.coeff_mode_dict = coeff_mode_dict
-        self.vec_phase_lookup = best['vec_phase_lookup']
+        self.vec_phase_lookup = vec_phase_lookup
         self.basis_modes_with_phase, self.nonbasis_modes_with_phase = extract_basis_modes_with_phases(
             additional_modes, self.vec_phase_lookup, zero_phase
         )
-        self.mobius_phase_result = best['mobius_result']
+        self.mobius_phase_result = mobius_result
 
         return coeff_mode_dict, w
 

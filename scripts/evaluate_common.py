@@ -11,6 +11,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 SRC_DIR = ROOT / "src"
 RESULTS_DIR = ROOT / "Results"
+DATA_DIR = ROOT / "Data"
 
 if str(SRC_DIR) not in sys.path:
     sys.path.insert(0, str(SRC_DIR))
@@ -36,6 +37,11 @@ from channel_LCU import (  # noqa: E402
 from block_encoding import BlockEncoding  # noqa: E402
 from baseline import simulate_lindblad  # noqa: E402
 from Hamiltonian import gate_count_summary, qdrift_hamiltonian, qsvt_Hamiltonian  # noqa: E402
+from qasm_export import (  # noqa: E402
+    DEFAULT_BASELINE_BASIS_GATES,
+    DEFAULT_BASELINE_OPTIMIZATION_LEVEL,
+    export_openqasm3_baseline,
+)
 from simulator_utils import normalize, simulate_circuit_statevec  # noqa: E402
 from series_expansion import (  # noqa: E402
     construct_circuit_coherent,

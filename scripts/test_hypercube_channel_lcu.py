@@ -13,6 +13,10 @@ if SRC_DIR not in sys.path:
 
 from hypercube_channel_pauli import build_hypercube_section52_channel  # type: ignore
 from channel_LCU import channel_to_LCU  # type: ignore
+from qasm_export import export_openqasm3_baseline  # type: ignore
+
+
+DATA_DIR = os.path.join(REPO_ROOT, "Data")
 
 
 @dataclass(frozen=True)
@@ -97,6 +101,22 @@ def collect_batch_stats(
 
         rows.extend(n_rows)
     return rows
+
+
+def build_hypercube_channel_lcu_baseline_circuit(n: int):
+    ensemble = build_hypercube_section52_channel(n)
+    qc, _ = channel_to_LCU(ensemble, structure="basic", opt="No")
+    return qc
+
+
+def export_hypercube_channel_lcu_baseline_openqasm3(
+    n: int = 4,
+    out_path: str | os.PathLike | None = None,
+) -> dict[str, object]:
+    if out_path is None:
+        out_path = os.path.join(DATA_DIR, f"test_hypercube_channel_lcu_basic_no_n{n}_baseline.qasm")
+    qc = build_hypercube_channel_lcu_baseline_circuit(n)
+    return export_openqasm3_baseline(qc, out_path)
 
 
 def print_table(rows: list[dict[str, int | str | float]]) -> None:

@@ -9,6 +9,7 @@ import numpy as np
 from qiskit import transpile
 
 from evaluate_common import (
+    DATA_DIR,
     RESULTS_DIR,
     Lindblad_to_channel,
     Lindbladian,
@@ -16,6 +17,7 @@ from evaluate_common import (
     channel_ensemble,
     channel_to_LCU,
     compression_ratio,
+    export_openqasm3_baseline,
     remove_save_instructions,
 )
 
@@ -83,6 +85,31 @@ def gate_count_channel_lcu_four_settings(num_qubits: int, delta_t: float = 0.1):
     return counts
 
 
+def build_channel_lcu_baseline_circuit(num_qubits: int, delta_t: float = 0.1):
+    gamma = np.sqrt(0.1) / 2
+    h_terms, l_terms = build_periodic_tfim_lindbladian_pauli(num_qubits, gamma)
+    tfim_lind = Lindbladian(h_terms, l_terms)
+    channel_lind, _, _ = Lindblad_to_channel(tfim_lind, float(delta_t))
+    single_channel = channel_lind.channels[0][1]
+    qc, _ = channel_to_LCU(
+        channel_ensemble([single_channel]),
+        structure="basic",
+        opt="No",
+    )
+    return remove_save_instructions(qc)
+
+
+def export_channel_lcu_baseline_openqasm3(
+    num_qubits: int = 4,
+    delta_t: float = 0.1,
+    out_path=None,
+) -> dict[str, object]:
+    if out_path is None:
+        out_path = DATA_DIR / f"evaluate_channel_lcu_gate_counts_basic_no_n{num_qubits}_baseline.qasm"
+    qc = build_channel_lcu_baseline_circuit(num_qubits, delta_t=delta_t)
+    return export_openqasm3_baseline(qc, out_path)
+
+
 def export_gate_counts_new(
     all_counts: dict,
     out_path=None,
@@ -148,4 +175,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-

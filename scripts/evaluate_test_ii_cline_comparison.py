@@ -5,9 +5,9 @@ from __future__ import annotations
 import argparse
 from itertools import product
 
-from qiskit import transpile
+from qiskit import QuantumCircuit, transpile
 
-from evaluate_common import BlockEncoding, Matrixsum, PauliAtom
+from evaluate_common import DATA_DIR, BlockEncoding, Matrixsum, PauliAtom, export_openqasm3_baseline
 
 
 def build_all_pauli_matrixsum(num_qubits: int) -> Matrixsum:
@@ -31,6 +31,21 @@ def gate_metrics_ctrl_line_from_blockencoding(ms: Matrixsum):
         "s": int(ops.get("s", 0)),
         "t": int(ops.get("t", 0)),
     }
+
+
+def build_all_pauli_baseline_circuit(num_qubits: int) -> QuantumCircuit:
+    ms = build_all_pauli_matrixsum(num_qubits)
+    return BlockEncoding(ms).circuit(opt="No")
+
+
+def export_all_pauli_baseline_openqasm3(
+    num_qubits: int = 3,
+    out_path=None,
+) -> dict[str, object]:
+    if out_path is None:
+        out_path = DATA_DIR / f"evaluate_test_ii_all_pauli_no_n{num_qubits}_baseline.qasm"
+    qc = build_all_pauli_baseline_circuit(num_qubits)
+    return export_openqasm3_baseline(qc, out_path)
 
 
 def test_all_pauli_matrixsum_ctrl_line(num_qubits: int):
@@ -73,4 +88,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-

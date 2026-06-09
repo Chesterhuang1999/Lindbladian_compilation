@@ -7,6 +7,7 @@ import argparse
 import numpy as np
 
 from evaluate_common import (
+    DATA_DIR,
     RESULTS_DIR,
     Lindbladian,
     build_tfim_decay_lindbladian_pauli,
@@ -14,6 +15,7 @@ from evaluate_common import (
     construct_circuit_coherent,
     construct_higher_order_circuit,
     construct_qobj_lind,
+    export_openqasm3_baseline,
     get_superop_qutip,
     simulate_lindblad,
 )
@@ -78,6 +80,48 @@ def run_decay_only_higher_order_accuracy():
 
     print(err_sets)
     return err_sets
+
+
+def build_decay_only_higher_order_baseline_circuit(
+    lambda_value: float = 1.0,
+    v: float = 0.5,
+    scaling: float = 1.0,
+    k_order: int = 1,
+    k1: int = 3,
+    q: int = 3,
+    total_time: float = 0.1,
+):
+    h_terms = []
+    l_terms = [
+        [
+            ("X", np.sqrt(lambda_value * (v + 1)) / scaling),
+            ("Y", 1j * np.sqrt(lambda_value * (v + 1)) / scaling),
+        ],
+        [
+            ("X", np.sqrt(lambda_value * v) / scaling),
+            ("Y", -1j * np.sqrt(lambda_value * v) / scaling),
+        ],
+    ]
+    decay_lind = Lindbladian(h_terms, l_terms)
+    qc, _, _, _ = construct_higher_order_circuit(
+        decay_lind,
+        k_order,
+        q,
+        total_time,
+        k1,
+        opt="No",
+    )
+    return qc
+
+
+def export_decay_only_higher_order_baseline_openqasm3(
+    out_path=None,
+    **kwargs,
+) -> dict[str, object]:
+    if out_path is None:
+        out_path = DATA_DIR / "evaluate_test_iii_2_decay_only_higher_order_no_baseline.qasm"
+    qc = build_decay_only_higher_order_baseline_circuit(**kwargs)
+    return export_openqasm3_baseline(qc, out_path)
 
 
 def run_tfim_decay_higher_order_accuracy(
@@ -153,6 +197,45 @@ def run_tfim_decay_higher_order_accuracy(
     return err_sets
 
 
+def build_tfim_decay_higher_order_baseline_circuit(
+    num_qubits: int = 2,
+    gamma: float = 0.1,
+    delta: float = 1.0,
+    coupling: float = 1.0,
+    time_step: float = 0.1,
+    k_order: int = 1,
+    k1: int = 3,
+    q: int = 3,
+):
+    h_terms, l_terms = build_tfim_decay_lindbladian_pauli(
+        num_qubits,
+        delta,
+        coupling,
+        gamma,
+    )
+    tfim_lind = Lindbladian(h_terms, l_terms)
+    qc, _, _, _ = construct_higher_order_circuit(
+        tfim_lind,
+        k_order,
+        q,
+        time_step,
+        k1,
+        opt="No",
+    )
+    return qc
+
+
+def export_tfim_decay_higher_order_baseline_openqasm3(
+    num_qubits: int = 2,
+    out_path=None,
+    **kwargs,
+) -> dict[str, object]:
+    if out_path is None:
+        out_path = DATA_DIR / f"evaluate_test_iii_2_tfim_decay_higher_order_no_n{num_qubits}_baseline.qasm"
+    qc = build_tfim_decay_higher_order_baseline_circuit(num_qubits=num_qubits, **kwargs)
+    return export_openqasm3_baseline(qc, out_path)
+
+
 def run_coherent_opt_sanity_check(
     num_qubits=2,
     delta=1.0,
@@ -187,6 +270,32 @@ def run_coherent_opt_sanity_check(
     err = np.linalg.norm(final_no - final_opt, ord="nuc") / 2
     print(f"Error between No opt and Matrix-order opt: {err}")
     return float(err)
+
+
+def build_coherent_baseline_circuit(
+    num_qubits: int = 2,
+    delta: float = 1.0,
+    coupling: float = 1.0,
+    gamma: float = 0.1,
+    k1: int = 3,
+    time_step: float = 0.1,
+):
+    h_terms, l_terms = build_tfim_decay_lindbladian_pauli(num_qubits, delta, coupling, gamma)
+    tfim_lind = Lindbladian(h_terms, l_terms)
+    h_eff = tfim_lind.effective_H()
+    qc, _ = construct_circuit_coherent(h_eff, k1, time_step, opt="No")
+    return qc
+
+
+def export_coherent_baseline_openqasm3(
+    num_qubits: int = 2,
+    out_path=None,
+    **kwargs,
+) -> dict[str, object]:
+    if out_path is None:
+        out_path = DATA_DIR / f"evaluate_test_iii_2_coherent_no_n{num_qubits}_baseline.qasm"
+    qc = build_coherent_baseline_circuit(num_qubits=num_qubits, **kwargs)
+    return export_openqasm3_baseline(qc, out_path)
 
 
 def plot_decay_only_qmethod():
