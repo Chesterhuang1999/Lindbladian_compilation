@@ -13,18 +13,17 @@ from qiskit.quantum_info import Operator
 
 
 ROOT = Path(__file__).resolve().parents[1]
-DEFAULT_INPUT = ROOT / "circuits" / "test_table1_m_no_n4_baseline.qasm"
-DEFAULT_OUTPUT = ROOT / "circuits" / "test_table1_m_no_n4_baseline_quartz_optimized.qasm"
-DEFAULT_STATS = ROOT / "circuits" / "test_table1_m_no_n4_baseline_quartz_stats.json"
-DEFAULT_ECC = ROOT / "external_tools" / "quartz" / "experiment" / "ecc_set" / "ibm_325_ecc.json"
+DEFAULT_INPUT = ROOT / "circuits" / "test_table1_m_no_n4_ibm_select.qasm"
+DEFAULT_OUTPUT = ROOT / "circuits" / "test_table1_m_no_n4_ibm_select_quartz_optimized.qasm"
+DEFAULT_STATS = ROOT / "circuits" / "test_table1_m_no_n4_ibm_select_quartz_stats.json"
+DEFAULT_ECC = ROOT / "external_tools" / "quartz" / "eccset" / "IBM_3_3_complete_ECC_set.json"
 IBM_GATE_SET = ("u1", "u2", "u3", "cx")
+IBM_QUARTZ_CONTEXT_GATES = IBM_GATE_SET + ("add",)
 COUNTED_GATES = IBM_GATE_SET + ("reset",)
 
 SRC_DIR = ROOT / "src"
 if str(SRC_DIR) not in sys.path:
     sys.path.insert(0, str(SRC_DIR))
-
-from qasm_export import export_openqasm2_quartz_input  # noqa: E402
 
 
 def _import_quartz():
@@ -171,6 +170,8 @@ def prepare_quartz_input(input_path: Path, quartz_input_path: Path) -> dict[str,
     if quartz_input_path.exists():
         return {"path": str(quartz_input_path), "generated": False}
 
+    from qasm_export import export_openqasm2_quartz_input  # noqa: PLC0415
+
     circuit = QuantumCircuit.from_qasm_file(str(input_path))
     result = export_openqasm2_quartz_input(
         circuit,
@@ -236,7 +237,7 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
     quartz_input = prepare_quartz_input(input_path, quartz_input_path)
 
     context = quartz.QuartzContext(
-        gate_set=list(IBM_GATE_SET),
+        gate_set=list(IBM_QUARTZ_CONTEXT_GATES),
         filename=str(ecc_path),
         no_increase=False,
         include_nop=True,
@@ -282,6 +283,7 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
 
     result = {
         "gate_set": list(IBM_GATE_SET),
+        "quartz_context_gate_set": list(IBM_QUARTZ_CONTEXT_GATES),
         "input": {
             "qasm_text": qasm_text_gate_stats(input_path),
             "quartz_input": {

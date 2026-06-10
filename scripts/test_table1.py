@@ -176,6 +176,26 @@ def build_tfim_lcu_block_encoding_circuit(
     return qc_pauli
 
 
+def build_tfim_lcu_select_circuit(
+    num_qubits: int,
+    metrics: str = "m_no",
+    delta_t: float = 0.1,
+) -> QuantumCircuit:
+    ms = _build_tfim_lcu_matrixsum(num_qubits, delta_t=delta_t)
+
+    if metrics == "m_no":
+        return BlockEncoding(ms).select_circuit(opt="No")
+    if metrics == "m_ctrl_line":
+        return BlockEncoding(ms).select_circuit(opt="Ctrl-line")
+    if metrics == "m_matrix_order":
+        return NewBlockEncoding(ms).select_circuit(opt="Matrix-order")
+    raise ValueError(
+        "Unsupported SELECT metrics="
+        f"{metrics!r}; choose one of "
+        "['m_no', 'm_ctrl_line', 'm_matrix_order']."
+    )
+
+
 def build_tfim_lcu_block_encoding_circuits(
     num_qubits: int,
     delta_t: float = 0.1,
@@ -214,7 +234,7 @@ def export_tfim_lcu_ibm_openqasm3(
 ) -> dict[str, object]:
     if out_path is None:
         out_path = DATA_DIR / f"test_table1_{metrics}_n{num_qubits}_ibm.qasm"
-    qc = build_tfim_lcu_block_encoding_circuit(
+    qc = build_tfim_lcu_select_circuit(
         num_qubits,
         metrics=metrics,
         delta_t=delta_t,
@@ -235,7 +255,7 @@ def export_tfim_lcu_nam_openqasm3(
 ) -> dict[str, object]:
     if out_path is None:
         out_path = DATA_DIR / f"test_table1_{metrics}_n{num_qubits}_nam.qasm"
-    qc = build_tfim_lcu_block_encoding_circuit(
+    qc = build_tfim_lcu_select_circuit(
         num_qubits,
         metrics=metrics,
         delta_t=delta_t,
