@@ -10,4 +10,5 @@
 *.cpython-313.pyc
 /Results/*
 /Papers/*
-/external_tools/
+/external_tools/*
+!/external_tools/quartz
