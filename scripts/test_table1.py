@@ -13,22 +13,28 @@ if str(SRC_DIR) not in sys.path:
     sys.path.insert(0, str(SRC_DIR))
 
 from block_encoding import BlockEncoding
+from block_encoding_new import BlockEncoding as NewBlockEncoding
 from channel_IR import Lindbladian
 from channel_LCU import Lindblad_to_channel
 from qasm_export import export_openqasm3_baseline
 
 
 DATA_DIR = ROOT / "circuits"
+IBM_BASIS_GATES = ("u1", "u2", "u3", "cx", "reset")
+NAM_BASIS_GATES = ("h", "x", "rz", "cx")
 
 
 def _count_metrics(qc: QuantumCircuit) -> dict[str, int]:
-    tqc = transpile(qc, basis_gates=["cx", "u3"], optimization_level=3)
+    tqc = transpile(qc, basis_gates=list(IBM_BASIS_GATES), optimization_level=0)
     ops = tqc.count_ops()
     return {
         "depth": int(tqc.depth()),
         "size": int(tqc.size()),
         "cx": int(ops.get("cx", 0)),
+        "u1": int(ops.get("u1", 0)),
+        "u2": int(ops.get("u2", 0)),
         "u3": int(ops.get("u3", 0)),
+        "reset": int(ops.get("reset", 0)),
         "num_qubits": int(tqc.num_qubits),
     }
 
@@ -61,15 +67,18 @@ def test_tfim_lcu_optimization(num_qubits: int) -> dict[str, dict[str, int]]:
     print(f"Test for case N = {num_qubits}:")
 
     block_encoding = BlockEncoding(ms)
-    qc_no = block_encoding.circuit(opt="No")
+    # qc_no = block_encoding.circuit(opt="No")
+    qc_no = block_encoding.select_circuit(opt = 'No')
     m_no = _count_metrics(qc_no)
 
     block_encoding = BlockEncoding(ms)
-    qc_ctrl_line = block_encoding.circuit(opt="Ctrl-line")
+    # qc_ctrl_line = block_encoding.circuit(opt="Ctrl-line")'
+    qc_ctrl_line = block_encoding.select_circuit(opt = 'Ctrl-line')
     m_ctrl_line = _count_metrics(qc_ctrl_line)
 
-    block_encoding = BlockEncoding(ms)
-    qc_matrix_order = block_encoding.circuit(opt="Matrix-order")
+    block_encoding = NewBlockEncoding(ms)
+    # qc_matrix_order = block_encoding.circuit(opt="Matrix-order")
+    qc_matrix_order = block_encoding.select_circuit(opt = 'Matrix-order')
     m_matrix_order = _count_metrics(qc_matrix_order)
 
     qc_pauli = QuantumCircuit(2 * num_qubits + 1)
@@ -92,7 +101,7 @@ def test_tfim_lcu_optimization(num_qubits: int) -> dict[str, dict[str, int]]:
     }
 
     base = all_metrics["(No)"]
-    print("=== Transpiled metrics (basis_gates=['cx','u3'], opt_level=3) ===")
+    print("=== Transpiled metrics (basis_gates=['u1','u2','u3','cx','reset'], opt_level=3) ===")
     for tag, values in all_metrics.items():
         depth_ratio = _ratio(values["depth"], base["depth"])
         size_ratio = _ratio(values["size"], base["size"])
@@ -100,7 +109,9 @@ def test_tfim_lcu_optimization(num_qubits: int) -> dict[str, dict[str, int]]:
         u3_ratio = _ratio(values["u3"], base["u3"])
         print(
             f"{tag}: qubits={values['num_qubits']}, depth={values['depth']}, "
-            f"size={values['size']}, cx={values['cx']}, u3={values['u3']}, "
+            f"size={values['size']}, cx={values['cx']}, "
+            f"u1={values['u1']}, u2={values['u2']}, u3={values['u3']}, "
+            f"reset={values['reset']}, "
             f"depth_ratio={depth_ratio:.4f}, size_ratio={size_ratio:.4f}, "
             f"cx_ratio={cx_ratio:.4f}, u3_ratio={u3_ratio:.4f}"
         )
@@ -143,7 +154,7 @@ def build_tfim_lcu_block_encoding_circuit(
     if metrics == "m_ctrl_line":
         return BlockEncoding(ms).circuit(opt="Ctrl-line")
     if metrics == "m_matrix_order":
-        return BlockEncoding(ms).circuit(opt="Matrix-order")
+        return NewBlockEncoding(ms).circuit(opt="Matrix-order")
     if metrics != "m_pauli":
         raise ValueError(
             "Unsupported metrics="
@@ -195,10 +206,68 @@ def export_tfim_lcu_baseline_openqasm3(
     return export_openqasm3_baseline(qc, out_path)
 
 
+def export_tfim_lcu_ibm_openqasm3(
+    num_qubits: int = 4,
+    metrics: str = "m_no",
+    out_path: str | Path | None = None,
+    delta_t: float = 0.1,
+) -> dict[str, object]:
+    if out_path is None:
+        out_path = DATA_DIR / f"test_table1_{metrics}_n{num_qubits}_ibm.qasm"
+    qc = build_tfim_lcu_block_encoding_circuit(
+        num_qubits,
+        metrics=metrics,
+        delta_t=delta_t,
+    )
+    return export_openqasm3_baseline(
+        qc,
+        out_path,
+        basis_gates=IBM_BASIS_GATES,
+        optimization_level=0,
+    )
+
+
+def export_tfim_lcu_nam_openqasm3(
+    num_qubits: int = 4,
+    metrics: str = "m_no",
+    out_path: str | Path | None = None,
+    delta_t: float = 0.1,
+) -> dict[str, object]:
+    if out_path is None:
+        out_path = DATA_DIR / f"test_table1_{metrics}_n{num_qubits}_nam.qasm"
+    qc = build_tfim_lcu_block_encoding_circuit(
+        num_qubits,
+        metrics=metrics,
+        delta_t=delta_t,
+    )
+    return export_openqasm3_baseline(
+        qc,
+        out_path,
+        basis_gates=NAM_BASIS_GATES,
+        optimization_level=0,
+        quartz_basis_gates=NAM_BASIS_GATES,
+    )
+
+
+def export_ctrl_line_and_matrix_order_ibm_openqasm3(
+    num_qubits: int = 4,
+    delta_t: float = 0.1,
+) -> dict[str, dict[str, object]]:
+    return {
+        metrics: export_tfim_lcu_ibm_openqasm3(
+            num_qubits=num_qubits,
+            metrics=metrics,
+            delta_t=delta_t,
+        )
+        for metrics in ("m_ctrl_line", "m_matrix_order")
+    }
+
+
 def main() -> None:
     for num_qubits in range(4, 20, 4):
         test_tfim_lcu_optimization(num_qubits)
 
 
 if __name__ == "__main__":
-    print(export_tfim_lcu_baseline_openqasm3(num_qubits=4, metrics="m_no"))
+    result = test_tfim_lcu_optimization(4)
+    print(result)

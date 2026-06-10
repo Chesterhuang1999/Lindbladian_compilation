@@ -10,3 +10,4 @@
 *.cpython-313.pyc
 /Results/*
 /Papers/*
+/external_tools/

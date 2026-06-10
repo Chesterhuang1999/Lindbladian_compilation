@@ -1,0 +1,88 @@
+-- Python include directories: /Users/chester_hqf/miniconda3/envs/channelIR_test/include/python3.12
+-- Python library directories: /Users/chester_hqf/miniconda3/envs/channelIR_test/lib
+-- Found pybind11: /Users/chester_hqf/miniconda3/envs/channelIR_test/lib/python3.12/site-packages/pybind11/include (found version "3.0.4")
+cat: /proc/version: No such file or directory
+build on macOS, link openmp lib with compiler clang
+-- Configuring done (0.1s)
+-- Generating done (0.1s)
+-- Build files have been written to: /Users/chester_hqf/Desktop/Research/2025/Lindbladian/Lindbladian_compilation/external_tools/quartz/build
+[ 92%] Built target quartz_runtime
+[ 96%] Building CXX object src/test/CMakeFiles/gen_ecc_set.dir/gen_ecc_set.cpp.o
+[100%] Linking CXX executable ../../gen_ecc_set
+[100%] Built target gen_ecc_set
+*** ch(/Users/chester_hqf/Desktop/Research/2025/Lindbladian/Lindbladian_compilation/external_tools/quartz/eccset/Nam,q=3) = 27
+BFS: 1 representative DAGs to search with 0 gates.
+Considering a total of 28 circuits split into 28 hash values...
+Processed 28 hash values that had only 1 circuit sequence, now processing the remaining 0 ones with 2 or more circuit sequences...
+Start checking equivalence with different hash...
+End checking equivalence with different hash. Solver invoked 0 times to find 0 equivalences with different hash, including 0 out of 0 possible equivalences under phase shift.
+0 equivalences found in 0.053000375046394765 seconds (solver invoked 0 times for 28 circuits with 28 different hash values and 0 potential equivalences), output 28 equivalence classes.
+Json saved in 0.00040374998934566975 seconds.
+BFS: 27 representative DAGs to search with 1 gates.
+Considering a total of 466 circuits split into 397 hash values...
+Processed 342 hash values that had only 1 circuit sequence, now processing the remaining 55 ones with 2 or more circuit sequences...
+Start checking equivalence with different hash...
+End checking equivalence with different hash. Solver invoked 0 times to find 0 equivalences with different hash, including 0 out of 0 possible equivalences under phase shift.
+69 equivalences found in 24.381655792007223 seconds (solver invoked 69 times for 466 circuits with 397 different hash values and 69 potential equivalences), output 397 equivalence classes.
+Json saved in 0.006388125009834766 seconds.
+Representative set saved in 0.002 seconds.
+Before ECC simplification: num_total_dags = 466, num_equivalence_classes = 397, #transformations /Users/chester_hqf/Desktop/Research/2025/Lindbladian/Lindbladian_compilation/external_tools/quartz/eccset/Nam_2_3 = 138
+/Users/chester_hqf/Desktop/Research/2025/Lindbladian/Lindbladian_compilation/external_tools/quartz/eccset/Nam_2_3 generated. Running Time (s): 25.11
+Pruning Time (s): 0.01
+Verification Time (s): 25.043
+Num_total_dags = 24, num_equivalence_classes = 6
+*** Number of transformations of /Users/chester_hqf/Desktop/Research/2025/Lindbladian/Lindbladian_compilation/external_tools/quartz/eccset/Nam_2_3 = 36
+*** ch(/Users/chester_hqf/Desktop/Research/2025/Lindbladian/Lindbladian_compilation/external_tools/quartz/eccset/Nam,q=3) = 27
+BFS: 1 representative DAGs to search with 0 gates.
+Considering a total of 28 circuits split into 28 hash values...
+Processed 28 hash values that had only 1 circuit sequence, now processing the remaining 0 ones with 2 or more circuit sequences...
+Start checking equivalence with different hash...
+End checking equivalence with different hash. Solver invoked 0 times to find 0 equivalences with different hash, including 0 out of 0 possible equivalences under phase shift.
+0 equivalences found in 0.07150366704445332 seconds (solver invoked 0 times for 28 circuits with 28 different hash values and 0 potential equivalences), output 28 equivalence classes.
+Json saved in 0.0005989590426906943 seconds.
+BFS: 27 representative DAGs to search with 1 gates.
+Considering a total of 466 circuits split into 397 hash values...
+Processed 342 hash values that had only 1 circuit sequence, now processing the remaining 55 ones with 2 or more circuit sequences...
+Start checking equivalence with different hash...
+End checking equivalence with different hash. Solver invoked 0 times to find 0 equivalences with different hash, including 0 out of 0 possible equivalences under phase shift.
+69 equivalences found in 22.8909740409581 seconds (solver invoked 69 times for 466 circuits with 397 different hash values and 69 potential equivalences), output 397 equivalence classes.
+Json saved in 0.0050642500864341855 seconds.
+BFS: 369 representative DAGs to search with 2 gates.
+Considering a total of 4496 circuits split into 4179 hash values...
+Processed 3908 hash values that had only 1 circuit sequence, now processing the remaining 271 ones with 2 or more circuit sequences...
+Start checking equivalence with different hash...
+End checking equivalence with different hash. Solver invoked 0 times to find 0 equivalences with different hash, including 0 out of 0 possible equivalences under phase shift.
+317 equivalences found in 84.35533754096832 seconds (solver invoked 317 times for 4496 circuits with 4179 different hash values and 317 potential equivalences), output 4179 equivalence classes.
+Json saved in 0.0606629999820143 seconds.
+Representative set saved in 0.019 seconds.
+Before ECC simplification: num_total_dags = 4496, num_equivalence_classes = 4179, #transformations /Users/chester_hqf/Desktop/Research/2025/Lindbladian/Lindbladian_compilation/external_tools/quartz/eccset/Nam_3_3 = 634
+/Users/chester_hqf/Desktop/Research/2025/Lindbladian/Lindbladian_compilation/external_tools/quartz/eccset/Nam_3_3 generated. Running Time (s): 109.079
+Pruning Time (s): 0.055
+Verification Time (s): 108.401
+Num_total_dags = 66, num_equivalence_classes = 23
+*** Number of transformations of /Users/chester_hqf/Desktop/Research/2025/Lindbladian/Lindbladian_compilation/external_tools/quartz/eccset/Nam_3_3 = 86
+*** ch(/Users/chester_hqf/Desktop/Research/2025/Lindbladian/Lindbladian_compilation/external_tools/quartz/eccset/Nam,q=3) = 27
+BFS: 1 representative DAGs to search with 0 gates.
+Considering a total of 28 circuits split into 28 hash values...
+Processed 28 hash values that had only 1 circuit sequence, now processing the remaining 0 ones with 2 or more circuit sequences...
+Start checking equivalence with different hash...
+End checking equivalence with different hash. Solver invoked 0 times to find 0 equivalences with different hash, including 0 out of 0 possible equivalences under phase shift.
+0 equivalences found in 0.052691707969643176 seconds (solver invoked 0 times for 28 circuits with 28 different hash values and 0 potential equivalences), output 28 equivalence classes.
+Json saved in 0.0005794999888166785 seconds.
+BFS: 27 representative DAGs to search with 1 gates.
+Considering a total of 466 circuits split into 397 hash values...
+Processed 342 hash values that had only 1 circuit sequence, now processing the remaining 55 ones with 2 or more circuit sequences...
+Start checking equivalence with different hash...
+End checking equivalence with different hash. Solver invoked 0 times to find 0 equivalences with different hash, including 0 out of 0 possible equivalences under phase shift.
+69 equivalences found in 19.897913415916264 seconds (solver invoked 69 times for 466 circuits with 397 different hash values and 69 potential equivalences), output 397 equivalence classes.
+Json saved in 0.0053029999835416675 seconds.
+BFS: 369 representative DAGs to search with 2 gates.
+Considering a total of 4496 circuits split into 4179 hash values...
+Processed 3908 hash values that had only 1 circuit sequence, now processing the remaining 271 ones with 2 or more circuit sequences...
+Start checking equivalence with different hash...
+End checking equivalence with different hash. Solver invoked 0 times to find 0 equivalences with different hash, including 0 out of 0 possible equivalences under phase shift.
+317 equivalences found in 83.83051133295521 seconds (solver invoked 317 times for 4496 circuits with 4179 different hash values and 317 potential equivalences), output 4179 equivalence classes.
+Json saved in 0.05991458299104124 seconds.
+BFS: 3782 representative DAGs to search with 3 gates.
+Considering a total of 38357 circuits split into 36186 hash values...
+Processed 34205 hash values that had only 1 circuit sequence, now processing the remaining 1981 ones with 2 or more circuit sequences...

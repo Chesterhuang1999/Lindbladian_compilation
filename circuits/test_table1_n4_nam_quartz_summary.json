@@ -1,0 +1,144 @@
+{
+  "basis_gates": [
+    "h",
+    "x",
+    "rz",
+    "cx"
+  ],
+  "comparison": {
+    "m_no": {
+      "cx_after": 512,
+      "cx_before": 514,
+      "delta_vs_quartz_input": -245,
+      "quartz_input_gate_count": 1664,
+      "quartz_optimized_gate_count": 1419,
+      "transpiled_qasm3_size": 1664
+    }
+  },
+  "ecc": "/Users/chester_hqf/Desktop/Research/2025/Lindbladian/Lindbladian_compilation/external_tools/quartz/eccset/Nam_5_3_complete_ECC_set.json",
+  "num_xfers": 1746,
+  "optimization_level": 0,
+  "results": [
+    {
+      "export": {
+        "basis_gates": [
+          "h",
+          "x",
+          "rz",
+          "cx"
+        ],
+        "cx": 514,
+        "depth": 1223,
+        "generated_in_this_process": true,
+        "num_qubits": 8,
+        "ops": {
+          "cx": 514,
+          "h": 290,
+          "rz": 794,
+          "x": 66
+        },
+        "optimization_level": 0,
+        "path": "/Users/chester_hqf/Desktop/Research/2025/Lindbladian/Lindbladian_compilation/circuits/test_table1_m_no_n4_nam.qasm",
+        "quartz_input": {
+          "basis_gates": [
+            "h",
+            "x",
+            "rz",
+            "cx"
+          ],
+          "cx": 514,
+          "depth": 1223,
+          "num_qubits": 8,
+          "ops": {
+            "cx": 514,
+            "h": 290,
+            "rz": 794,
+            "x": 66
+          },
+          "path": "/Users/chester_hqf/Desktop/Research/2025/Lindbladian/Lindbladian_compilation/circuits/test_table1_m_no_n4_nam_quartz_input.qasm",
+          "size": 1664,
+          "u1": 0,
+          "u2": 0,
+          "u3": 0,
+          "written": true
+        },
+        "reset": 0,
+        "size": 1664,
+        "u1": 0,
+        "u2": 0,
+        "u3": 0
+      },
+      "input": {
+        "qasm3": {
+          "cx": 514,
+          "h": 290,
+          "nam_gate_count": 1664,
+          "num_qubits": 8,
+          "ops": {
+            "cx": 514,
+            "h": 290,
+            "rz": 794,
+            "x": 66
+          },
+          "path": "/Users/chester_hqf/Desktop/Research/2025/Lindbladian/Lindbladian_compilation/circuits/test_table1_m_no_n4_nam.qasm",
+          "rz": 794,
+          "size": 1664,
+          "x": 66
+        },
+        "quartz": {
+          "cx_count": 514,
+          "depth": 1223,
+          "gate_count": 1664
+        },
+        "quartz_input": {
+          "cx": 514,
+          "h": 290,
+          "nam_gate_count": 1664,
+          "num_qubits": 8,
+          "ops": {
+            "cx": 514,
+            "h": 290,
+            "rz": 794,
+            "x": 66
+          },
+          "path": "/Users/chester_hqf/Desktop/Research/2025/Lindbladian/Lindbladian_compilation/circuits/test_table1_m_no_n4_nam_quartz_input.qasm",
+          "rz": 794,
+          "size": 1664,
+          "x": 66
+        }
+      },
+      "metric": "m_no",
+      "output": {
+        "qasm": {
+          "cx": 512,
+          "h": 210,
+          "nam_gate_count": 1419,
+          "num_qubits": 8,
+          "ops": {
+            "cx": 512,
+            "h": 210,
+            "rz": 663,
+            "x": 34
+          },
+          "path": "/Users/chester_hqf/Desktop/Research/2025/Lindbladian/Lindbladian_compilation/circuits/test_table1_m_no_n4_nam_quartz_optimized.qasm",
+          "rz": 663,
+          "size": 1419,
+          "x": 34
+        },
+        "quartz": {
+          "cx_count": 512,
+          "depth": 1100,
+          "gate_count": 1419
+        }
+      },
+      "quartz": {
+        "search": {
+          "elapsed_sec": 11563.157913923264,
+          "invoke_count": 2346164169,
+          "seen_circuits": 1184410,
+          "timed_out": true
+        }
+      }
+    }
+  ]
+}

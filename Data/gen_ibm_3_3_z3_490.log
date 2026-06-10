@@ -1,0 +1,37 @@
+*** ch(/Users/chester_hqf/Desktop/Research/2025/Lindbladian/Lindbladian_compilation/external_tools/quartz/eccset/IBM,q=3) = 1362
+BFS: 1 representative DAGs to search with 0 gates.
+/Users/chester_hqf/miniconda3/envs/quartz_py39_z3_4812/lib/python3.9/site-packages/z3/z3core.py:5: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.
+  import pkg_resources
+Considering a total of 1363 circuits split into 1363 hash values...
+Processed 1363 hash values that had only 1 circuit sequence, now processing the remaining 0 ones with 2 or more circuit sequences...
+Start checking equivalence with different hash...
+End checking equivalence with different hash. Solver invoked 0 times to find 0 equivalences with different hash, including 0 out of 0 possible equivalences under phase shift.
+0 equivalences found in 0.06428125000000001 seconds (solver invoked 0 times for 1363 circuits with 1363 different hash values and 0 potential equivalences), output 1363 equivalence classes.
+Json saved in 0.01137170799999998 seconds.
+BFS: 1362 representative DAGs to search with 1 gates.
+/Users/chester_hqf/miniconda3/envs/quartz_py39_z3_4812/lib/python3.9/site-packages/z3/z3core.py:5: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.
+  import pkg_resources
+Considering a total of 26515 circuits split into 23000 hash values...
+Processed 20225 hash values that had only 1 circuit sequence, now processing the remaining 2775 ones with 2 or more circuit sequences...
+/Users/chester_hqf/miniconda3/envs/quartz_py39_z3_4812/lib/python3.9/site-packages/z3/z3core.py:5: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.
+  import pkg_resources
+/Users/chester_hqf/miniconda3/envs/quartz_py39_z3_4812/lib/python3.9/site-packages/z3/z3core.py:5: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.
+  import pkg_resources
+/Users/chester_hqf/miniconda3/envs/quartz_py39_z3_4812/lib/python3.9/site-packages/z3/z3core.py:5: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.
+  import pkg_resources
+/Users/chester_hqf/miniconda3/envs/quartz_py39_z3_4812/lib/python3.9/site-packages/z3/z3core.py:5: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.
+  import pkg_resources
+/Users/chester_hqf/miniconda3/envs/quartz_py39_z3_4812/lib/python3.9/site-packages/z3/z3core.py:5: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.
+  import pkg_resources
+/Users/chester_hqf/miniconda3/envs/quartz_py39_z3_4812/lib/python3.9/site-packages/z3/z3core.py:5: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.
+  import pkg_resources
+/Users/chester_hqf/miniconda3/envs/quartz_py39_z3_4812/lib/python3.9/site-packages/z3/z3core.py:5: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.
+  import pkg_resources
+/Users/chester_hqf/miniconda3/envs/quartz_py39_z3_4812/lib/python3.9/site-packages/z3/z3core.py:5: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.
+  import pkg_resources
+/Users/chester_hqf/miniconda3/envs/quartz_py39_z3_4812/lib/python3.9/site-packages/z3/z3core.py:5: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.
+  import pkg_resources
+/Users/chester_hqf/miniconda3/envs/quartz_py39_z3_4812/lib/python3.9/site-packages/z3/z3core.py:5: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.
+  import pkg_resources
+/Users/chester_hqf/miniconda3/envs/quartz_py39_z3_4812/lib/python3.9/multiprocessing/resource_tracker.py:216: UserWarning: resource_tracker: There appear to be 6 leaked semaphore objects to clean up at shutdown
+  warnings.warn('resource_tracker: There appear to be %d '

@@ -1,0 +1,20 @@
+Quartz Nam optimization statevector verification for test_table1 m_no n=4
+
+pre_optimization_qasm: circuits/test_table1_m_no_n4_nam_quartz_input.qasm
+post_optimization_qasm: circuits/test_table1_m_no_n4_nam_quartz_optimized.qasm
+num_qubits_pre: 8
+num_qubits_post: 8
+ctrl_qubits_flattened: [0, 1, 2, 3]
+sys_qubits_flattened: [4, 5, 6, 7]
+condition: ctrl register == 0000
+
+pre_gate_count: 1664
+post_gate_count: 1622
+pre_ops: {'rz': 794, 'cx': 514, 'h': 290, 'x': 66}
+post_ops: {'rz': 776, 'cx': 514, 'h': 266, 'x': 66}
+
+prob_ctrl_zero_pre: 0.36150745333868817
+prob_ctrl_zero_post: 0.36150794848255907
+conditional_state_overlap: 0.99999999998465139 + -5.3948715539320347e-06j
+conditional_state_fidelity: 0.99999999999840727
+trace_distance: 1.2620324683332238e-06

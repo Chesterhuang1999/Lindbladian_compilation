@@ -1,0 +1,432 @@
+Quartz improved gate_count 1664 -> 1660 after 20107 rewrite attempts.
+Quartz improved gate_count 1664 -> 1659 after 23340 rewrite attempts.
+Quartz improved gate_count 1664 -> 1658 after 1675654 rewrite attempts.
+Quartz improved gate_count 1664 -> 1657 after 1675714 rewrite attempts.
+Quartz improved gate_count 1664 -> 1656 after 4573949 rewrite attempts.
+Quartz improved gate_count 1664 -> 1655 after 4574051 rewrite attempts.
+Quartz improved gate_count 1664 -> 1654 after 7465057 rewrite attempts.
+Quartz improved gate_count 1664 -> 1653 after 7466600 rewrite attempts.
+Quartz improved gate_count 1664 -> 1652 after 10352673 rewrite attempts.
+Quartz improved gate_count 1664 -> 1651 after 10354234 rewrite attempts.
+Quartz improved gate_count 1664 -> 1650 after 13236797 rewrite attempts.
+Quartz improved gate_count 1664 -> 1649 after 13238408 rewrite attempts.
+Quartz improved gate_count 1664 -> 1648 after 16117429 rewrite attempts.
+Quartz improved gate_count 1664 -> 1647 after 17255236 rewrite attempts.
+Quartz improved gate_count 1664 -> 1646 after 18994568 rewrite attempts.
+Quartz improved gate_count 1664 -> 1645 after 20130996 rewrite attempts.
+Quartz improved gate_count 1664 -> 1644 after 21868215 rewrite attempts.
+Quartz improved gate_count 1664 -> 1643 after 23003494 rewrite attempts.
+Quartz improved gate_count 1664 -> 1642 after 24738371 rewrite attempts.
+Quartz improved gate_count 1664 -> 1641 after 25872319 rewrite attempts.
+Quartz improved gate_count 1664 -> 1640 after 27605035 rewrite attempts.
+Quartz improved gate_count 1664 -> 1639 after 28737629 rewrite attempts.
+Quartz improved gate_count 1664 -> 1638 after 30468207 rewrite attempts.
+Quartz improved gate_count 1664 -> 1637 after 30468510 rewrite attempts.
+Quartz improved gate_count 1664 -> 1636 after 33327887 rewrite attempts.
+Quartz improved gate_count 1664 -> 1635 after 34457749 rewrite attempts.
+Quartz improved gate_count 1664 -> 1634 after 36184075 rewrite attempts.
+Quartz improved gate_count 1664 -> 1633 after 37312582 rewrite attempts.
+Quartz improved gate_count 1664 -> 1632 after 39036771 rewrite attempts.
+Quartz improved gate_count 1664 -> 1631 after 40163909 rewrite attempts.
+Quartz improved gate_count 1664 -> 1630 after 41885975 rewrite attempts.
+Quartz improved gate_count 1664 -> 1629 after 43011765 rewrite attempts.
+Quartz improved gate_count 1664 -> 1628 after 44731687 rewrite attempts.
+Quartz improved gate_count 1664 -> 1627 after 45856118 rewrite attempts.
+Quartz improved gate_count 1664 -> 1626 after 47573907 rewrite attempts.
+Quartz improved gate_count 1664 -> 1625 after 48696971 rewrite attempts.
+Quartz improved gate_count 1664 -> 1624 after 50412635 rewrite attempts.
+Quartz improved gate_count 1664 -> 1623 after 51534351 rewrite attempts.
+Quartz improved gate_count 1664 -> 1622 after 53247871 rewrite attempts.
+Quartz improved gate_count 1664 -> 1621 after 54368245 rewrite attempts.
+Quartz improved gate_count 1664 -> 1620 after 56079615 rewrite attempts.
+Quartz improved gate_count 1664 -> 1619 after 57198663 rewrite attempts.
+Quartz improved gate_count 1664 -> 1618 after 58907867 rewrite attempts.
+Quartz improved gate_count 1664 -> 1617 after 60025549 rewrite attempts.
+Quartz improved gate_count 1664 -> 1616 after 61732627 rewrite attempts.
+Quartz improved gate_count 1664 -> 1615 after 62848961 rewrite attempts.
+Quartz improved gate_count 1664 -> 1614 after 64553895 rewrite attempts.
+Quartz improved gate_count 1664 -> 1613 after 65668867 rewrite attempts.
+Quartz improved gate_count 1664 -> 1612 after 67371671 rewrite attempts.
+Quartz improved gate_count 1664 -> 1611 after 68485277 rewrite attempts.
+Quartz improved gate_count 1664 -> 1610 after 70185955 rewrite attempts.
+Quartz improved gate_count 1664 -> 1609 after 71298213 rewrite attempts.
+Quartz improved gate_count 1664 -> 1608 after 72996747 rewrite attempts.
+Quartz improved gate_count 1664 -> 1607 after 74107662 rewrite attempts.
+Quartz improved gate_count 1664 -> 1606 after 75804047 rewrite attempts.
+Quartz improved gate_count 1664 -> 1605 after 76913636 rewrite attempts.
+Quartz improved gate_count 1664 -> 1604 after 78607855 rewrite attempts.
+Quartz improved gate_count 1664 -> 1603 after 79716078 rewrite attempts.
+Quartz improved gate_count 1664 -> 1602 after 81408171 rewrite attempts.
+Quartz improved gate_count 1664 -> 1601 after 82515046 rewrite attempts.
+Quartz improved gate_count 1664 -> 1600 after 84204995 rewrite attempts.
+Quartz improved gate_count 1664 -> 1599 after 85310524 rewrite attempts.
+Quartz improved gate_count 1664 -> 1598 after 86998327 rewrite attempts.
+Quartz improved gate_count 1664 -> 1597 after 88102508 rewrite attempts.
+Quartz improved gate_count 1664 -> 1596 after 89788167 rewrite attempts.
+Quartz improved gate_count 1664 -> 1595 after 90890968 rewrite attempts.
+Quartz improved gate_count 1664 -> 1594 after 92574515 rewrite attempts.
+Quartz improved gate_count 1664 -> 1593 after 93675971 rewrite attempts.
+Quartz improved gate_count 1664 -> 1592 after 95357371 rewrite attempts.
+Quartz improved gate_count 1664 -> 1591 after 96457509 rewrite attempts.
+Quartz improved gate_count 1664 -> 1590 after 98136735 rewrite attempts.
+Quartz improved gate_count 1664 -> 1589 after 99235503 rewrite attempts.
+Quartz improved gate_count 1664 -> 1588 after 100912607 rewrite attempts.
+Quartz improved gate_count 1664 -> 1587 after 102010027 rewrite attempts.
+Quartz improved gate_count 1664 -> 1586 after 103684987 rewrite attempts.
+Quartz improved gate_count 1664 -> 1585 after 104781104 rewrite attempts.
+Quartz improved gate_count 1664 -> 1584 after 106453875 rewrite attempts.
+Quartz improved gate_count 1664 -> 1583 after 107548652 rewrite attempts.
+Quartz improved gate_count 1664 -> 1582 after 109219271 rewrite attempts.
+Quartz improved gate_count 1664 -> 1581 after 110312696 rewrite attempts.
+Quartz improved gate_count 1664 -> 1580 after 111981175 rewrite attempts.
+Quartz improved gate_count 1664 -> 1579 after 113073267 rewrite attempts.
+Quartz improved gate_count 1664 -> 1578 after 114739587 rewrite attempts.
+Quartz improved gate_count 1664 -> 1577 after 115830338 rewrite attempts.
+Quartz improved gate_count 1664 -> 1576 after 117494507 rewrite attempts.
+Quartz improved gate_count 1664 -> 1575 after 118583901 rewrite attempts.
+Quartz improved gate_count 1664 -> 1574 after 120245935 rewrite attempts.
+Quartz improved gate_count 1664 -> 1573 after 121334003 rewrite attempts.
+Quartz improved gate_count 1664 -> 1572 after 122993871 rewrite attempts.
+Quartz improved gate_count 1664 -> 1571 after 124080598 rewrite attempts.
+Quartz improved gate_count 1664 -> 1570 after 125738315 rewrite attempts.
+Quartz improved gate_count 1664 -> 1569 after 126831913 rewrite attempts.
+Quartz improved gate_count 1664 -> 1568 after 128479267 rewrite attempts.
+Quartz improved gate_count 1664 -> 1567 after 129571481 rewrite attempts.
+Quartz improved gate_count 1664 -> 1566 after 131216727 rewrite attempts.
+Quartz improved gate_count 1664 -> 1565 after 132307552 rewrite attempts.
+Quartz improved gate_count 1664 -> 1564 after 133950695 rewrite attempts.
+Quartz improved gate_count 1664 -> 1563 after 135040218 rewrite attempts.
+Quartz improved gate_count 1664 -> 1562 after 136681171 rewrite attempts.
+Quartz improved gate_count 1664 -> 1561 after 137769304 rewrite attempts.
+Quartz improved gate_count 1664 -> 1560 after 139408155 rewrite attempts.
+Quartz improved gate_count 1664 -> 1559 after 140494944 rewrite attempts.
+Quartz improved gate_count 1664 -> 1558 after 142131647 rewrite attempts.
+Quartz improved gate_count 1664 -> 1557 after 143217046 rewrite attempts.
+Quartz improved gate_count 1664 -> 1556 after 144851647 rewrite attempts.
+Quartz improved gate_count 1664 -> 1555 after 145935773 rewrite attempts.
+Quartz improved gate_count 1664 -> 1554 after 147568155 rewrite attempts.
+Quartz improved gate_count 1664 -> 1553 after 148650957 rewrite attempts.
+Quartz improved gate_count 1664 -> 1552 after 150281171 rewrite attempts.
+Quartz improved gate_count 1664 -> 1551 after 151362594 rewrite attempts.
+Quartz improved gate_count 1664 -> 1550 after 152990695 rewrite attempts.
+Quartz improved gate_count 1664 -> 1549 after 154070843 rewrite attempts.
+Quartz improved gate_count 1664 -> 1548 after 155696727 rewrite attempts.
+Quartz improved gate_count 1664 -> 1547 after 156775550 rewrite attempts.
+Quartz improved gate_count 1664 -> 1546 after 158399267 rewrite attempts.
+Quartz improved gate_count 1664 -> 1545 after 159476910 rewrite attempts.
+Quartz improved gate_count 1664 -> 1544 after 161098315 rewrite attempts.
+Quartz improved gate_count 1664 -> 1543 after 162174573 rewrite attempts.
+Quartz improved gate_count 1664 -> 1542 after 163793871 rewrite attempts.
+Quartz improved gate_count 1664 -> 1541 after 164868859 rewrite attempts.
+Quartz improved gate_count 1664 -> 1540 after 166485935 rewrite attempts.
+Quartz improved gate_count 1664 -> 1539 after 167559646 rewrite attempts.
+Quartz improved gate_count 1664 -> 1538 after 169174507 rewrite attempts.
+Quartz improved gate_count 1664 -> 1537 after 171860603 rewrite attempts.
+Quartz improved gate_count 1664 -> 1536 after 174544944 rewrite attempts.
+Quartz improved gate_count 1664 -> 1535 after 177227540 rewrite attempts.
+Quartz improved gate_count 1664 -> 1534 after 179908389 rewrite attempts.
+Quartz improved gate_count 1664 -> 1533 after 182587493 rewrite attempts.
+Quartz improved gate_count 1664 -> 1532 after 185264850 rewrite attempts.
+Quartz improved gate_count 1664 -> 1531 after 187940462 rewrite attempts.
+Quartz improved gate_count 1664 -> 1530 after 190614327 rewrite attempts.
+Quartz improved gate_count 1664 -> 1529 after 193286451 rewrite attempts.
+Quartz improved gate_count 1664 -> 1528 after 195956825 rewrite attempts.
+Quartz improved gate_count 1664 -> 1527 after 198625453 rewrite attempts.
+Quartz improved gate_count 1664 -> 1526 after 201292335 rewrite attempts.
+Quartz improved gate_count 1664 -> 1525 after 203957472 rewrite attempts.
+Quartz improved gate_count 1664 -> 1524 after 206620863 rewrite attempts.
+Quartz improved gate_count 1664 -> 1523 after 209282506 rewrite attempts.
+Quartz improved gate_count 1664 -> 1522 after 211942405 rewrite attempts.
+Quartz improved gate_count 1664 -> 1521 after 214600558 rewrite attempts.
+Quartz improved gate_count 1664 -> 1520 after 217256965 rewrite attempts.
+Quartz improved gate_count 1664 -> 1519 after 219911624 rewrite attempts.
+Quartz improved gate_count 1664 -> 1518 after 222564539 rewrite attempts.
+Quartz improved gate_count 1664 -> 1517 after 225215709 rewrite attempts.
+Quartz improved gate_count 1664 -> 1516 after 227865130 rewrite attempts.
+Quartz improved gate_count 1664 -> 1515 after 230512807 rewrite attempts.
+Quartz improved gate_count 1664 -> 1514 after 233158738 rewrite attempts.
+Quartz improved gate_count 1664 -> 1513 after 235802923 rewrite attempts.
+Quartz improved gate_count 1664 -> 1512 after 238445360 rewrite attempts.
+Quartz improved gate_count 1664 -> 1511 after 241086053 rewrite attempts.
+Quartz improved gate_count 1664 -> 1510 after 243725000 rewrite attempts.
+Quartz improved gate_count 1664 -> 1509 after 246362201 rewrite attempts.
+Quartz improved gate_count 1664 -> 1508 after 248997654 rewrite attempts.
+Quartz improved gate_count 1664 -> 1507 after 251631363 rewrite attempts.
+Quartz improved gate_count 1664 -> 1506 after 254263326 rewrite attempts.
+Quartz improved gate_count 1664 -> 1505 after 256893543 rewrite attempts.
+Quartz improved gate_count 1664 -> 1504 after 259522012 rewrite attempts.
+Quartz improved gate_count 1664 -> 1503 after 262148737 rewrite attempts.
+Quartz improved gate_count 1664 -> 1502 after 264773716 rewrite attempts.
+Quartz improved gate_count 1664 -> 1501 after 267396949 rewrite attempts.
+Quartz improved gate_count 1664 -> 1500 after 270018434 rewrite attempts.
+Quartz improved gate_count 1664 -> 1499 after 272638176 rewrite attempts.
+Quartz improved gate_count 1664 -> 1498 after 275256173 rewrite attempts.
+Quartz improved gate_count 1664 -> 1497 after 277872420 rewrite attempts.
+Quartz improved gate_count 1664 -> 1496 after 280486923 rewrite attempts.
+Quartz improved gate_count 1664 -> 1495 after 283099680 rewrite attempts.
+Quartz improved gate_count 1664 -> 1494 after 285710691 rewrite attempts.
+Quartz improved gate_count 1664 -> 1493 after 288319954 rewrite attempts.
+Quartz improved gate_count 1664 -> 1492 after 290927473 rewrite attempts.
+Quartz improved gate_count 1664 -> 1491 after 293533246 rewrite attempts.
+Quartz improved gate_count 1664 -> 1490 after 296137274 rewrite attempts.
+Quartz improved gate_count 1664 -> 1488 after 298739553 rewrite attempts.
+Quartz improved gate_count 1664 -> 1487 after 301339080 rewrite attempts.
+Quartz improved gate_count 1664 -> 1486 after 302365798 rewrite attempts.
+Quartz improved gate_count 1664 -> 1485 after 303935111 rewrite attempts.
+Quartz improved gate_count 1664 -> 1484 after 306528660 rewrite attempts.
+Quartz improved gate_count 1664 -> 1483 after 309120465 rewrite attempts.
+Quartz improved gate_count 1664 -> 1482 after 311710527 rewrite attempts.
+Quartz improved gate_count 1664 -> 1481 after 314298838 rewrite attempts.
+Quartz improved gate_count 1664 -> 1480 after 316885405 rewrite attempts.
+Quartz improved gate_count 1664 -> 1479 after 319471477 rewrite attempts.
+Quartz improved gate_count 1664 -> 1478 after 322054552 rewrite attempts.
+Quartz improved gate_count 1664 -> 1477 after 324635879 rewrite attempts.
+Quartz improved gate_count 1664 -> 1476 after 327215462 rewrite attempts.
+Quartz improved gate_count 1664 -> 1475 after 329793299 rewrite attempts.
+Quartz improved gate_count 1664 -> 1474 after 332369390 rewrite attempts.
+Quartz improved gate_count 1664 -> 1472 after 334943733 rewrite attempts.
+Quartz improved gate_count 1664 -> 1471 after 337515324 rewrite attempts.
+Quartz improved gate_count 1664 -> 1470 after 338531002 rewrite attempts.
+Quartz improved gate_count 1664 -> 1469 after 340083419 rewrite attempts.
+Quartz improved gate_count 1664 -> 1468 after 342649032 rewrite attempts.
+Quartz improved gate_count 1664 -> 1467 after 345212901 rewrite attempts.
+Quartz improved gate_count 1664 -> 1466 after 347775024 rewrite attempts.
+Quartz improved gate_count 1664 -> 1465 after 350335399 rewrite attempts.
+Quartz improved gate_count 1664 -> 1464 after 352894030 rewrite attempts.
+Quartz improved gate_count 1664 -> 1463 after 355450915 rewrite attempts.
+Quartz improved gate_count 1664 -> 1462 after 358006054 rewrite attempts.
+Quartz improved gate_count 1664 -> 1461 after 360559445 rewrite attempts.
+Quartz improved gate_count 1664 -> 1460 after 363111093 rewrite attempts.
+Quartz improved gate_count 1664 -> 1459 after 365660994 rewrite attempts.
+Quartz improved gate_count 1664 -> 1458 after 368209147 rewrite attempts.
+Quartz improved gate_count 1664 -> 1457 after 370755556 rewrite attempts.
+Quartz improved gate_count 1664 -> 1456 after 373300219 rewrite attempts.
+Quartz improved gate_count 1664 -> 1455 after 375843136 rewrite attempts.
+Quartz improved gate_count 1664 -> 1454 after 378384305 rewrite attempts.
+Quartz improved gate_count 1664 -> 1453 after 380923731 rewrite attempts.
+Quartz improved gate_count 1664 -> 1452 after 383461410 rewrite attempts.
+Quartz improved gate_count 1664 -> 1451 after 385997341 rewrite attempts.
+Quartz improved gate_count 1664 -> 1450 after 388531528 rewrite attempts.
+Quartz improved gate_count 1664 -> 1449 after 391063969 rewrite attempts.
+Quartz improved gate_count 1664 -> 1448 after 393594662 rewrite attempts.
+Quartz improved gate_count 1664 -> 1447 after 396123613 rewrite attempts.
+Quartz improved gate_count 1664 -> 1446 after 398650814 rewrite attempts.
+Quartz improved gate_count 1664 -> 1445 after 401176270 rewrite attempts.
+Quartz improved gate_count 1664 -> 1444 after 403699979 rewrite attempts.
+Quartz improved gate_count 1664 -> 1443 after 406221946 rewrite attempts.
+Quartz improved gate_count 1664 -> 1442 after 408742165 rewrite attempts.
+Quartz improved gate_count 1664 -> 1441 after 411260638 rewrite attempts.
+Quartz improved gate_count 1664 -> 1440 after 413777363 rewrite attempts.
+Quartz improved gate_count 1664 -> 1439 after 416292344 rewrite attempts.
+Quartz improved gate_count 1664 -> 1438 after 418805579 rewrite attempts.
+Quartz improved gate_count 1664 -> 1437 after 421317068 rewrite attempts.
+Quartz improved gate_count 1664 -> 1436 after 423826809 rewrite attempts.
+Quartz improved gate_count 1664 -> 1435 after 426334806 rewrite attempts.
+Quartz improved gate_count 1664 -> 1434 after 428841057 rewrite attempts.
+Quartz improved gate_count 1664 -> 1433 after 431345562 rewrite attempts.
+Quartz improved gate_count 1664 -> 1432 after 433848319 rewrite attempts.
+Quartz improved gate_count 1664 -> 1431 after 436349333 rewrite attempts.
+Quartz improved gate_count 1664 -> 1430 after 438848598 rewrite attempts.
+Quartz improved gate_count 1664 -> 1429 after 441346118 rewrite attempts.
+Quartz improved gate_count 1664 -> 1428 after 443841894 rewrite attempts.
+Quartz improved gate_count 1664 -> 1427 after 446335922 rewrite attempts.
+Quartz improved gate_count 1664 -> 1426 after 448828203 rewrite attempts.
+Quartz improved gate_count 1664 -> 1425 after 451318742 rewrite attempts.
+Quartz improved gate_count 1664 -> 1424 after 453807531 rewrite attempts.
+Quartz improved gate_count 1664 -> 1423 after 456294575 rewrite attempts.
+Quartz improved gate_count 1664 -> 1422 after 458779872 rewrite attempts.
+Quartz improved gate_count 1664 -> 1421 after 461263427 rewrite attempts.
+Quartz improved gate_count 1664 -> 1420 after 463749731 rewrite attempts.
+{
+  "basis_gates": [
+    "h",
+    "x",
+    "rz",
+    "cx"
+  ],
+  "comparison": {
+    "m_no": {
+      "cx_after": 512,
+      "cx_before": 514,
+      "delta_vs_quartz_input": -244,
+      "quartz_input_gate_count": 1664,
+      "quartz_optimized_gate_count": 1420,
+      "transpiled_qasm3_size": 1664
+    }
+  },
+  "ecc": "/Users/chester_hqf/Desktop/Research/2025/Lindbladian/Lindbladian_compilation/external_tools/quartz/eccset/Nam_5_3_complete_ECC_set.json",
+  "num_xfers": 1746,
+  "optimization_level": 0,
+  "results": [
+    {
+      "export": {
+        "basis_gates": [
+          "h",
+          "x",
+          "rz",
+          "cx"
+        ],
+        "cx": 514,
+        "depth": 1223,
+        "generated_in_this_process": true,
+        "num_qubits": 8,
+        "ops": {
+          "cx": 514,
+          "h": 290,
+          "rz": 794,
+          "x": 66
+        },
+        "optimization_level": 0,
+        "path": "/Users/chester_hqf/Desktop/Research/2025/Lindbladian/Lindbladian_compilation/circuits/test_table1_m_no_n4_nam.qasm",
+        "quartz_input": {
+          "basis_gates": [
+            "h",
+            "x",
+            "rz",
+            "cx"
+          ],
+          "cx": 514,
+          "depth": 1223,
+          "num_qubits": 8,
+          "ops": {
+            "cx": 514,
+            "h": 290,
+            "rz": 794,
+            "x": 66
+          },
+          "path": "/Users/chester_hqf/Desktop/Research/2025/Lindbladian/Lindbladian_compilation/circuits/test_table1_m_no_n4_nam_quartz_input.qasm",
+          "size": 1664,
+          "u1": 0,
+          "u2": 0,
+          "u3": 0,
+          "written": true
+        },
+        "reset": 0,
+        "size": 1664,
+        "u1": 0,
+        "u2": 0,
+        "u3": 0
+      },
+      "input": {
+        "qasm3": {
+          "cx": 514,
+          "h": 290,
+          "nam_gate_count": 1664,
+          "num_qubits": 8,
+          "ops": {
+            "cx": 514,
+            "h": 290,
+            "rz": 794,
+            "x": 66
+          },
+          "path": "/Users/chester_hqf/Desktop/Research/2025/Lindbladian/Lindbladian_compilation/circuits/test_table1_m_no_n4_nam.qasm",
+          "rz": 794,
+          "size": 1664,
+          "x": 66
+        },
+        "quartz": {
+          "cx_count": 514,
+          "depth": 1223,
+          "gate_count": 1664
+        },
+        "quartz_input": {
+          "cx": 514,
+          "h": 290,
+          "nam_gate_count": 1664,
+          "num_qubits": 8,
+          "ops": {
+            "cx": 514,
+            "h": 290,
+            "rz": 794,
+            "x": 66
+          },
+          "path": "/Users/chester_hqf/Desktop/Research/2025/Lindbladian/Lindbladian_compilation/circuits/test_table1_m_no_n4_nam_quartz_input.qasm",
+          "rz": 794,
+          "size": 1664,
+          "x": 66
+        }
+      },
+      "metric": "m_no",
+      "output": {
+        "qasm": {
+          "cx": 512,
+          "h": 210,
+          "nam_gate_count": 1420,
+          "num_qubits": 8,
+          "ops": {
+            "cx": 512,
+            "h": 210,
+            "rz": 663,
+            "x": 35
+          },
+          "path": "/Users/chester_hqf/Desktop/Research/2025/Lindbladian/Lindbladian_compilation/circuits/test_table1_m_no_n4_nam_quartz_optimized.qasm",
+          "rz": 663,
+          "size": 1420,
+          "x": 35
+        },
+        "quartz": {
+          "cx_count": 512,
+          "depth": 1101,
+          "gate_count": 1420
+        }
+      },
+      "quartz": {
+        "search": {
+          "elapsed_sec": 3600.0048129558563,
+          "invoke_count": 529022309,
+          "seen_circuits": 282935,
+          "timed_out": true
+        }
+      }
+    }
+  ]
+}
+/Users/chester_hqf/Desktop/Research/2025/Lindbladian/Lindbladian_compilation/Baseline_scripts/quartz_optimize_nam_table1.py:242: UserWarning: enum class GateType not importable from CCore. You are probably using a cpdef enum declared in a .pxd file that does not have a .py  or .pyx file.
+  context = quartz.QuartzContext(
+Assumption that all parameters are rational multiples of PI is violated. The result might not be accurate.
+Assumption that all parameters are rational multiples of PI is violated. The result might not be accurate.
+Assumption that all parameters are rational multiples of PI is violated. The result might not be accurate.
+Assumption that all parameters are rational multiples of PI is violated. The result might not be accurate.
+Assumption that all parameters are rational multiples of PI is violated. The result might not be accurate.
+Assumption that all parameters are rational multiples of PI is violated. The result might not be accurate.
+Assumption that all parameters are rational multiples of PI is violated. The result might not be accurate.
+Assumption that all parameters are rational multiples of PI is violated. The result might not be accurate.
+Assumption that all parameters are rational multiples of PI is violated. The result might not be accurate.
+Assumption that all parameters are rational multiples of PI is violated. The result might not be accurate.
+Assumption that all parameters are rational multiples of PI is violated. The result might not be accurate.
+Assumption that all parameters are rational multiples of PI is violated. The result might not be accurate.
+Assumption that all parameters are rational multiples of PI is violated. The result might not be accurate.
+Assumption that all parameters are rational multiples of PI is violated. The result might not be accurate.
+Assumption that all parameters are rational multiples of PI is violated. The result might not be accurate.
+Assumption that all parameters are rational multiples of PI is violated. The result might not be accurate.
+Assumption that all parameters are rational multiples of PI is violated. The result might not be accurate.
+Assumption that all parameters are rational multiples of PI is violated. The result might not be accurate.
+Assumption that all parameters are rational multiples of PI is violated. The result might not be accurate.
+Assumption that all parameters are rational multiples of PI is violated. The result might not be accurate.
+Assumption that all parameters are rational multiples of PI is violated. The result might not be accurate.
+Assumption that all parameters are rational multiples of PI is violated. The result might not be accurate.
+Assumption that all parameters are rational multiples of PI is violated. The result might not be accurate.
+Assumption that all parameters are rational multiples of PI is violated. The result might not be accurate.
+Assumption that all parameters are rational multiples of PI is violated. The result might not be accurate.
+Assumption that all parameters are rational multiples of PI is violated. The result might not be accurate.
+Assumption that all parameters are rational multiples of PI is violated. The result might not be accurate.
+Assumption that all parameters are rational multiples of PI is violated. The result might not be accurate.
+Assumption that all parameters are rational multiples of PI is violated. The result might not be accurate.
+Assumption that all parameters are rational multiples of PI is violated. The result might not be accurate.
+Assumption that all parameters are rational multiples of PI is violated. The result might not be accurate.
+Assumption that all parameters are rational multiples of PI is violated. The result might not be accurate.
+Assumption that all parameters are rational multiples of PI is violated. The result might not be accurate.
+Assumption that all parameters are rational multiples of PI is violated. The result might not be accurate.
+Assumption that all parameters are rational multiples of PI is violated. The result might not be accurate.
+Assumption that all parameters are rational multiples of PI is violated. The result might not be accurate.
+Assumption that all parameters are rational multiples of PI is violated. The result might not be accurate.
+Assumption that all parameters are rational multiples of PI is violated. The result might not be accurate.
+Assumption that all parameters are rational multiples of PI is violated. The result might not be accurate.
+Assumption that all parameters are rational multiples of PI is violated. The result might not be accurate.
+Assumption that all parameters are rational multiples of PI is violated. The result might not be accurate.
+Assumption that all parameters are rational multiples of PI is violated. The result might not be accurate.
+Assumption that all parameters are rational multiples of PI is violated. The result might not be accurate.
+Assumption that all parameters are rational multiples of PI is violated. The result might not be accurate.
+Assumption that all parameters are rational multiples of PI is violated. The result might not be accurate.
+
+

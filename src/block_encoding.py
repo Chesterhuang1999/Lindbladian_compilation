@@ -1196,7 +1196,16 @@ class BlockEncoding:
             "non_clifford_count": non_clifford_count,
         }
         return qc, stats
-
+    def select_circuit(self, opt = None):
+        if opt == 'No':
+            qc_u, tcount, mccount, cxcount = self.mulplex_U(self.mat_list, self.ctrl_size, self.sys_size)
+            return qc_u
+        elif opt == 'Ctrl-line':
+            qc_u, tcount, mccount, cxcount = self.mulplex_U_opt(self.mat_list, self.ctrl_size, self.sys_size)
+            return qc_u
+        elif opt == 'Matrix-order':
+            qc_u, tcount, mccount, cxcount, ctrl_size = self.mulplex_U_opt_order()
+            return qc_u
     def circuit(self, opt = None):
         """
         Returns the block-encoding QuantumCircuit for the operator J.
