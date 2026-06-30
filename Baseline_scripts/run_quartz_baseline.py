@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import heapq
+import json
 import sys
 import tempfile
 import time
@@ -66,6 +67,12 @@ def optimize_with_quartz(
     max_candidates: int,
     upper_limit: float,
     progress_every: int,
+    checkpoint_qasm_path: Path | None,
+    checkpoint_summary_path: Path | None,
+    checkpoint_interval_sec: float,
+    use_available_xfers: bool,
+    prune_relative_to_best: bool,
+    eliminate_rotation: bool,
 ):
     start = time.perf_counter()
     original_gate_count = int(init_graph.gate_count)
@@ -75,6 +82,45 @@ def optimize_with_quartz(
     seen = {init_graph.hash()}
     invoke_count = 0
     candidate_serial = 1
+    checkpoint_count = 0
+    next_checkpoint_at = (
+        start + checkpoint_interval_sec if checkpoint_interval_sec > 0 else float("inf")
+    )
+
+    def search_stats(timed_out: bool) -> dict[str, Any]:
+        return {
+            "candidate_queue_len": len(candidates),
+            "checkpoint_count": checkpoint_count,
+            "elapsed_seconds": time.perf_counter() - start,
+            "invoke_count": invoke_count,
+            "seen_circuits": len(seen),
+            "timed_out": timed_out,
+        }
+
+    def maybe_checkpoint(force: bool = False) -> None:
+        nonlocal checkpoint_count, next_checkpoint_at
+        now = time.perf_counter()
+        if checkpoint_qasm_path is None or (not force and now < next_checkpoint_at):
+            return
+
+        checkpoint_qasm_path.parent.mkdir(parents=True, exist_ok=True)
+        best_graph.to_qasm(filename=str(checkpoint_qasm_path))
+        checkpoint_count += 1
+        stats = {
+            "best_gate_count": best_gate_count,
+            "checkpoint_count": checkpoint_count,
+            "elapsed_seconds": now - start,
+            "invoke_count": invoke_count,
+            "path": str(checkpoint_qasm_path),
+            "seen_circuits": len(seen),
+        }
+        if checkpoint_summary_path is not None:
+            checkpoint_summary_path.parent.mkdir(parents=True, exist_ok=True)
+            checkpoint_summary_path.write_text(
+                json.dumps(stats, indent=2, sort_keys=True) + "\n",
+                encoding="utf-8",
+            )
+        next_checkpoint_at = now + checkpoint_interval_sec
 
     while candidates:
         if time.perf_counter() - start >= timeout_sec:
@@ -86,21 +132,30 @@ def optimize_with_quartz(
         _, _, graph = heapq.heappop(candidates)
         nodes = graph.all_nodes()
 
-        for xfer in context.get_xfers():
-            for node in nodes:
+        node_xfers = (
+            (
+                node,
+                [
+                    context.get_xfer_from_id(id=int(xfer_id))
+                    for xfer_id in graph.available_xfers_parallel(context=context, node=node)
+                ],
+            )
+            for node in nodes
+        ) if use_available_xfers else ((node, context.get_xfers()) for node in nodes)
+
+        for node, xfers in node_xfers:
+            for xfer in xfers:
+                if xfer is None:
+                    continue
                 if time.perf_counter() - start >= timeout_sec:
-                    return best_graph, {
-                        "invoke_count": invoke_count,
-                        "seen_circuits": len(seen),
-                        "elapsed_seconds": time.perf_counter() - start,
-                        "timed_out": True,
-                    }
+                    maybe_checkpoint(force=True)
+                    return best_graph, search_stats(timed_out=True)
 
                 invoke_count += 1
                 new_graph = graph.apply_xfer(
                     xfer=xfer,
                     node=node,
-                    eliminate_rotation=True,
+                    eliminate_rotation=eliminate_rotation,
                 )
                 if new_graph is None:
                     continue
@@ -111,12 +166,14 @@ def optimize_with_quartz(
                 seen.add(new_hash)
 
                 new_gate_count = int(new_graph.gate_count)
-                if new_gate_count > int(original_gate_count * upper_limit):
+                limit_base = best_gate_count if prune_relative_to_best else original_gate_count
+                if new_gate_count > int(limit_base * upper_limit):
                     continue
 
                 if new_gate_count < best_gate_count:
                     best_gate_count = new_gate_count
                     best_graph = new_graph
+                    maybe_checkpoint(force=True)
                     print(
                         "Quartz improved gate_count "
                         f"{original_gate_count} -> {best_gate_count} "
@@ -133,13 +190,10 @@ def optimize_with_quartz(
                         f"seen={len(seen)}, best_gate_count={best_gate_count}",
                         flush=True,
                     )
+                maybe_checkpoint()
 
-    return best_graph, {
-        "invoke_count": invoke_count,
-        "seen_circuits": len(seen),
-        "elapsed_seconds": time.perf_counter() - start,
-        "timed_out": False,
-    }
+    maybe_checkpoint(force=True)
+    return best_graph, search_stats(timed_out=False)
 
 
 def prepare_quartz_input(input_path: Path, output_path: Path, basis_gates: tuple[str, ...]) -> dict[str, Any]:
@@ -164,6 +218,16 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         raise FileNotFoundError(f"Quartz ECC set not found: {ecc_path}")
 
     output_path = Path(args.output).resolve() if args.output else None
+    checkpoint_qasm_path = Path(args.checkpoint_output).resolve() if args.checkpoint_output else None
+    checkpoint_summary_path = (
+        Path(args.checkpoint_summary).resolve()
+        if args.checkpoint_summary
+        else (
+            checkpoint_qasm_path.with_suffix(".json")
+            if checkpoint_qasm_path is not None
+            else None
+        )
+    )
     with tempfile.TemporaryDirectory(prefix="quartz_baseline_") as tmp_dir:
         tmp_dir_path = Path(tmp_dir)
         quartz_input_path = tmp_dir_path / "quartz_input.qasm"
@@ -180,8 +244,8 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         context = quartz.QuartzContext(
             gate_set=list(config["context"]),
             filename=str(ecc_path),
-            no_increase=False,
-            include_nop=True,
+            no_increase=bool(args.no_increase),
+            include_nop=not bool(args.no_nop),
         )
         num_xfers = int(context.num_xfers)
         if num_xfers <= 1 and not args.allow_trivial_xfer_set:
@@ -198,6 +262,12 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
             max_candidates=int(args.max_candidates),
             upper_limit=float(args.upper_limit),
             progress_every=int(args.progress_every),
+            checkpoint_qasm_path=checkpoint_qasm_path,
+            checkpoint_summary_path=checkpoint_summary_path,
+            checkpoint_interval_sec=float(args.checkpoint_interval),
+            use_available_xfers=bool(args.use_available_xfers),
+            prune_relative_to_best=bool(args.prune_relative_to_best),
+            eliminate_rotation=not bool(args.no_eliminate_rotation),
         )
 
         actual_output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -216,6 +286,25 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
             "context_gate_set": list(config["context"]),
             "ecc": str(ecc_path),
             "num_xfers": num_xfers,
+            "quartz_options": {
+                "checkpoint_interval": float(args.checkpoint_interval),
+                "checkpoint_output": (
+                    str(checkpoint_qasm_path) if checkpoint_qasm_path is not None else None
+                ),
+                "checkpoint_summary": (
+                    str(checkpoint_summary_path)
+                    if checkpoint_summary_path is not None
+                    else None
+                ),
+                "eliminate_rotation": not bool(args.no_eliminate_rotation),
+                "include_nop": not bool(args.no_nop),
+                "max_candidates": int(args.max_candidates),
+                "no_increase": bool(args.no_increase),
+                "prune_relative_to_best": bool(args.prune_relative_to_best),
+                "progress_every": int(args.progress_every),
+                "upper_limit": float(args.upper_limit),
+                "use_available_xfers": bool(args.use_available_xfers),
+            },
             "kept_output": kept_output,
             "output_qasm": str(actual_output_path) if kept_output else None,
             "input_stats": input_stats,
@@ -245,9 +334,38 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--summary", default=None, help="Optional JSON summary path.")
     parser.add_argument("--ecc", default=None, help="Override Quartz ECC JSON.")
     parser.add_argument("--timeout", type=float, default=3600.0, help="Quartz search timeout in seconds.")
-    parser.add_argument("--max-candidates", type=int, default=10000)
-    parser.add_argument("--upper-limit", type=float, default=1.05)
+    parser.add_argument("--max-candidates", type=int, default=1000)
+    parser.add_argument("--upper-limit", type=float, default=1.0)
     parser.add_argument("--progress-every", type=int, default=0)
+    parser.add_argument(
+        "--checkpoint-interval",
+        type=float,
+        default=0.0,
+        help="Write the current best graph every N seconds; 0 disables periodic checkpoints.",
+    )
+    parser.add_argument("--checkpoint-output", default=None, help="Checkpoint QASM path.")
+    parser.add_argument("--checkpoint-summary", default=None, help="Checkpoint JSON summary path.")
+    parser.add_argument(
+        "--no-increase",
+        action="store_true",
+        help="Load only Quartz transfers that do not increase gate count.",
+    )
+    parser.add_argument("--no-nop", action="store_true", help="Do not include Quartz nop transfer.")
+    parser.add_argument(
+        "--use-available-xfers",
+        action="store_true",
+        help="Ask Quartz for applicable transfers per node instead of trying every transfer.",
+    )
+    parser.add_argument(
+        "--prune-relative-to-best",
+        action="store_true",
+        help="Apply upper-limit relative to the current best count instead of the original count.",
+    )
+    parser.add_argument(
+        "--no-eliminate-rotation",
+        action="store_true",
+        help="Disable Quartz eliminate_rotation during transfer application.",
+    )
     parser.add_argument("--allow-trivial-xfer-set", action="store_true")
     return parser
 

@@ -17,6 +17,7 @@ if str(SCRIPT_DIR) not in sys.path:
 from baseline_common import (  # noqa: E402
     compare_gate_stats,
     count_qasm_file,
+    load_qasm_stats_or_count,
     require_input_qasm,
     write_summary,
 )
@@ -47,26 +48,25 @@ def rebase_to_gate_set(circuit, gate_set: str) -> bool:
     return bool(AutoRebase(target).apply(circuit))
 
 
-def run(args: argparse.Namespace) -> dict[str, Any]:
-    try:
-        from pytket.qasm import circuit_from_qasm, circuit_to_qasm  # noqa: PLC0415
-    except ImportError as exc:
-        raise RuntimeError(
-            "Could not import pytket. Run with qiskit_simulate or ChannelIR_test."
-        ) from exc
+def optimize_candidate(
+    *,
+    input_circuit,
+    input_path: Path,
+    input_stats: dict[str, Any],
+    gate_set: str,
+    pass_name: str,
+    rebase_to_input_gateset: bool,
+    output_path: Path | None,
+) -> dict[str, Any]:
+    from pytket.qasm import circuit_to_qasm  # noqa: PLC0415
 
-    input_path = require_input_qasm(Path(args.input))
-    input_stats = count_qasm_file(input_path)
-    gate_set = str(input_stats["detected_gate_set"])
-    output_path = Path(args.output).resolve() if args.output else None
-
+    circuit = input_circuit.copy()
     start = time.perf_counter()
-    circuit = circuit_from_qasm(str(input_path))
     before_tket_gates = int(circuit.n_gates)
-    opt_pass = build_pytket_pass(args.pass_name)
+    opt_pass = build_pytket_pass(pass_name)
     applied = bool(opt_pass.apply(circuit))
     rebase_applied = False
-    if not args.no_rebase_to_input_gateset:
+    if rebase_to_input_gateset:
         rebase_applied = rebase_to_gate_set(circuit, gate_set)
     after_tket_gates = int(circuit.n_gates)
     elapsed = time.perf_counter() - start
@@ -79,24 +79,147 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         if output_path is None:
             output_stats["path"] = None
 
-    summary: dict[str, Any] = {
-        "tool": "pytket",
+    return {
         "input": str(input_path),
         "detected_gate_set": gate_set,
-        "pass": args.pass_name,
+        "pass": pass_name,
         "kept_output": output_path is not None,
         "output_qasm": str(output_path) if output_path is not None else None,
-        "input_stats": input_stats,
         "output_stats": output_stats,
         "comparison": compare_gate_stats(input_stats, output_stats, gate_set),
         "pytket_stats": {
             "pass_applied": applied,
-            "rebase_to_input_gateset": not bool(args.no_rebase_to_input_gateset),
+            "rebase_to_input_gateset": bool(rebase_to_input_gateset),
             "rebase_applied": rebase_applied,
             "n_gates_before": before_tket_gates,
             "n_gates_after": after_tket_gates,
             "elapsed_seconds": elapsed,
         },
+    }
+
+
+def candidate_key(candidate: dict[str, Any], objective: str) -> tuple[int, int]:
+    stats = candidate["output_stats"]
+    if objective == "metric_total":
+        return (int(stats["metric_total"]), int(stats["total_ops"]))
+    return (int(stats["total_ops"]), int(stats["metric_total"]))
+
+
+def run(args: argparse.Namespace) -> dict[str, Any]:
+    try:
+        from pytket.qasm import circuit_from_qasm  # noqa: PLC0415
+    except ImportError as exc:
+        raise RuntimeError(
+            "Could not import pytket. Run with qiskit_simulate or ChannelIR_test."
+        ) from exc
+
+    input_path = require_input_qasm(Path(args.input))
+    input_stats = load_qasm_stats_or_count(
+        input_path,
+        stats_path=Path(args.input_stats).resolve() if args.input_stats else None,
+    )
+    gate_set = str(input_stats["detected_gate_set"])
+    output_path = Path(args.output).resolve() if args.output else None
+
+    circuit = circuit_from_qasm(str(input_path))
+    if args.strategy == "best-of":
+        if gate_set == "ibm":
+            candidate_specs = [
+                {
+                    "name": "full-peephole-input-gateset",
+                    "pass_name": "full-peephole",
+                    "rebase_to_input_gateset": True,
+                },
+                {
+                    "name": "remove-redundancies-input-gateset",
+                    "pass_name": "remove-redundancies",
+                    "rebase_to_input_gateset": True,
+                },
+            ]
+        else:
+            candidate_specs = [
+                {
+                    "name": "full-peephole-natural",
+                    "pass_name": "full-peephole",
+                    "rebase_to_input_gateset": False,
+                },
+                {
+                    "name": "remove-redundancies-input-gateset",
+                    "pass_name": "remove-redundancies",
+                    "rebase_to_input_gateset": True,
+                },
+            ]
+        candidates = []
+        for spec in candidate_specs:
+            candidate = optimize_candidate(
+                input_circuit=circuit,
+                input_path=input_path,
+                input_stats=input_stats,
+                gate_set=gate_set,
+                pass_name=str(spec["pass_name"]),
+                rebase_to_input_gateset=bool(spec["rebase_to_input_gateset"]),
+                output_path=None,
+            )
+            candidate["name"] = spec["name"]
+            candidates.append(candidate)
+
+        selected = min(candidates, key=lambda item: candidate_key(item, args.best_of_objective))
+        output_candidate = selected
+        if output_path is not None:
+            output_candidate = optimize_candidate(
+                input_circuit=circuit,
+                input_path=input_path,
+                input_stats=input_stats,
+                gate_set=gate_set,
+                pass_name=str(selected["pass"]),
+                rebase_to_input_gateset=bool(
+                    selected["pytket_stats"]["rebase_to_input_gateset"]
+                ),
+                output_path=output_path,
+            )
+            output_candidate["name"] = selected["name"]
+        output_stats = output_candidate["output_stats"]
+        comparison = compare_gate_stats(input_stats, output_stats, gate_set)
+        pytket_stats = output_candidate["pytket_stats"]
+        selected_candidate = {
+            "name": selected["name"],
+            "pass": selected["pass"],
+            "rebase_to_input_gateset": selected["pytket_stats"][
+                "rebase_to_input_gateset"
+            ],
+            "objective": args.best_of_objective,
+            "objective_value": candidate_key(selected, args.best_of_objective)[0],
+        }
+    else:
+        output_candidate = optimize_candidate(
+            input_circuit=circuit,
+            input_path=input_path,
+            input_stats=input_stats,
+            gate_set=gate_set,
+            pass_name=args.pass_name,
+            rebase_to_input_gateset=not bool(args.no_rebase_to_input_gateset),
+            output_path=output_path,
+        )
+        output_stats = output_candidate["output_stats"]
+        comparison = output_candidate["comparison"]
+        pytket_stats = output_candidate["pytket_stats"]
+        candidates = []
+        selected_candidate = None
+
+    summary: dict[str, Any] = {
+        "tool": "pytket",
+        "input": str(input_path),
+        "detected_gate_set": gate_set,
+        "strategy": args.strategy,
+        "pass": output_candidate["pass"],
+        "kept_output": output_path is not None,
+        "output_qasm": str(output_path) if output_path is not None else None,
+        "input_stats": input_stats,
+        "output_stats": output_stats,
+        "comparison": comparison,
+        "pytket_stats": pytket_stats,
+        "selected_candidate": selected_candidate,
+        "candidates": candidates,
         "note": "pytket may rebase to a different QASM basis; output_stats.ops counts the gates actually emitted.",
     }
 
@@ -109,12 +232,29 @@ def build_parser() -> argparse.ArgumentParser:
         description="Run a pytket optimization pass on one QASM input and report gate counts."
     )
     parser.add_argument("--input", required=True, help="Input OpenQASM2 file.")
+    parser.add_argument("--input-stats", default=None, help="Optional cached input stats JSON.")
     parser.add_argument("--output", default=None, help="Optional path to keep optimized QASM.")
     parser.add_argument("--summary", default=None, help="Optional JSON summary path.")
+    parser.add_argument(
+        "--strategy",
+        choices=["single", "best-of"],
+        default="single",
+        help=(
+            "single runs --pass-name once. best-of compares FullPeephole without "
+            "rebasing against RemoveRedundancies rebased to the input gate set."
+        ),
+    )
+    parser.add_argument(
+        "--best-of-objective",
+        choices=["total_ops", "metric_total"],
+        default="total_ops",
+        help="Objective used to select the best candidate when --strategy best-of is used.",
+    )
     parser.add_argument(
         "--pass-name",
         choices=["full-peephole", "remove-redundancies", "synthesise-tket"],
         default="full-peephole",
+        help="pytket pass used when --strategy single is selected.",
     )
     parser.add_argument(
         "--no-rebase-to-input-gateset",

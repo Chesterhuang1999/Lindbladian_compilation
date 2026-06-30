@@ -17,6 +17,7 @@ if str(SCRIPT_DIR) not in sys.path:
 from baseline_common import (  # noqa: E402
     compare_gate_stats,
     count_qasm_file,
+    load_qasm_stats_or_count,
     require_input_qasm,
     run_command,
     tail_text,
@@ -32,7 +33,10 @@ WISQ_GATESETS = {
 
 def run(args: argparse.Namespace) -> dict[str, Any]:
     input_path = require_input_qasm(Path(args.input))
-    input_stats = count_qasm_file(input_path)
+    input_stats = load_qasm_stats_or_count(
+        input_path,
+        stats_path=Path(args.input_stats).resolve() if args.input_stats else None,
+    )
     gate_set = str(input_stats["detected_gate_set"])
     target_gateset = args.target_gateset or WISQ_GATESETS[gate_set]
     output_path = Path(args.output).resolve() if args.output else None
@@ -112,6 +116,7 @@ def build_parser() -> argparse.ArgumentParser:
         description="Run WISQ/GUOQ on one QASM input, infer IBM/NAM, and report gate counts."
     )
     parser.add_argument("--input", required=True, help="Input OpenQASM2 file.")
+    parser.add_argument("--input-stats", default=None, help="Optional cached input stats JSON.")
     parser.add_argument("--output", default=None, help="Optional path to keep optimized QASM.")
     parser.add_argument("--summary", default=None, help="Optional JSON summary path.")
     parser.add_argument("--wisq", default="wisq", help="WISQ executable.")

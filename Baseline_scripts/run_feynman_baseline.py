@@ -19,6 +19,7 @@ from baseline_common import (  # noqa: E402
     compare_gate_stats,
     count_qasm_file,
     count_qasm_text,
+    load_qasm_stats_or_count,
     require_input_qasm,
     run_command,
     tail_text,
@@ -85,7 +86,10 @@ def parse_comment_counts(section: str) -> dict[str, Any]:
 
 def run(args: argparse.Namespace) -> dict[str, Any]:
     input_path = require_input_qasm(Path(args.input))
-    input_stats = count_qasm_file(input_path)
+    input_stats = load_qasm_stats_or_count(
+        input_path,
+        stats_path=Path(args.input_stats).resolve() if args.input_stats else None,
+    )
     gate_set = str(input_stats["detected_gate_set"])
 
     feynopt = Path(args.feynopt).resolve()
@@ -145,6 +149,7 @@ def build_parser() -> argparse.ArgumentParser:
         description="Run Feynman feynopt on one QASM input and report gate counts."
     )
     parser.add_argument("--input", required=True, help="Input OpenQASM2 file.")
+    parser.add_argument("--input-stats", default=None, help="Optional cached input stats JSON.")
     parser.add_argument("--output", default=None, help="Optional path to keep optimized QASM.")
     parser.add_argument("--summary", default=None, help="Optional JSON summary path.")
     parser.add_argument("--feynopt", default=str(DEFAULT_FEYNOPT), help="Feynman feynopt executable.")

@@ -13,10 +13,17 @@ if SRC_DIR not in sys.path:
 
 from hypercube_channel_pauli import build_hypercube_section52_channel  # type: ignore
 from channel_LCU import channel_to_LCU  # type: ignore
-from qasm_export import export_openqasm3_baseline  # type: ignore
+from qasm_export import (  # type: ignore
+    export_openqasm2_quartz_input,
+    export_openqasm3_baseline,
+)
 
 
 DATA_DIR = os.path.join(REPO_ROOT, "Data")
+HYPERCUBEW_CIRCUIT_DIR = os.path.join(REPO_ROOT, "circuits", "hypercubeW")
+HYPERCUBEW_BASELINE_N_POINTS = [4, 8, 12, 20]
+NAM_BASIS_GATES = ("h", "x", "rz", "cx")
+IBM_BASIS_GATES = ("u1", "u2", "u3", "cx")
 
 
 @dataclass(frozen=True)
@@ -117,6 +124,124 @@ def export_hypercube_channel_lcu_baseline_openqasm3(
         out_path = os.path.join(DATA_DIR, f"test_hypercube_channel_lcu_basic_no_n{n}_baseline.qasm")
     qc = build_hypercube_channel_lcu_baseline_circuit(n)
     return export_openqasm3_baseline(qc, out_path)
+
+
+def default_hypercube_channel_lcu_nam_qasm2_path(n: int) -> str:
+    return os.path.join(
+        HYPERCUBEW_CIRCUIT_DIR,
+        f"hypercubeW_channel_lcu_basic_no_n{n}_nam_qasm2.qasm",
+    )
+
+
+def default_hypercube_channel_lcu_ibm_qasm2_path(n: int) -> str:
+    return os.path.join(
+        HYPERCUBEW_CIRCUIT_DIR,
+        f"hypercubeW_channel_lcu_basic_no_n{n}_ibm_qasm2.qasm",
+    )
+
+
+def export_hypercube_channel_lcu_nam_qasm2(
+    n: int = 4,
+    out_path: str | os.PathLike | None = None,
+) -> dict[str, object]:
+    """Export the full hypercube channel simulation circuit in Nam QASM2 form."""
+    if out_path is None:
+        out_path = default_hypercube_channel_lcu_nam_qasm2_path(n)
+
+    qc = build_hypercube_channel_lcu_baseline_circuit(n)
+    tqc = transpile(
+        qc,
+        basis_gates=list(NAM_BASIS_GATES),
+        optimization_level=0,
+    )
+    result = export_openqasm2_quartz_input(
+        tqc,
+        out_path,
+        basis_gates=NAM_BASIS_GATES,
+    )
+    result.update(
+        {
+            "benchmark": "hypercubeW",
+            "format": "openqasm2",
+            "n": int(n),
+            "structure": "basic",
+            "opt": "No",
+            "basis_gates": list(NAM_BASIS_GATES),
+            "optimization_level": 0,
+        }
+    )
+    return result
+
+
+def export_hypercube_channel_lcu_ibm_qasm2(
+    n: int = 4,
+    out_path: str | os.PathLike | None = None,
+) -> dict[str, object]:
+    """Export the full hypercube channel simulation circuit in IBM QASM2 form."""
+    if out_path is None:
+        out_path = default_hypercube_channel_lcu_ibm_qasm2_path(n)
+
+    qc = build_hypercube_channel_lcu_baseline_circuit(n)
+    tqc = transpile(
+        qc,
+        basis_gates=list(IBM_BASIS_GATES),
+        optimization_level=0,
+    )
+    result = export_openqasm2_quartz_input(
+        tqc,
+        out_path,
+        basis_gates=IBM_BASIS_GATES,
+    )
+    result.update(
+        {
+            "benchmark": "hypercubeW",
+            "format": "openqasm2",
+            "n": int(n),
+            "structure": "basic",
+            "opt": "No",
+            "basis_gates": list(IBM_BASIS_GATES),
+            "optimization_level": 0,
+        }
+    )
+    return result
+
+
+def export_hypercube_channel_lcu_nam_qasm2_batch(
+    n_points: list[int] | None = None,
+    out_dir: str | os.PathLike | None = None,
+) -> list[dict[str, object]]:
+    if n_points is None:
+        n_points = HYPERCUBEW_BASELINE_N_POINTS
+    if out_dir is None:
+        out_dir = HYPERCUBEW_CIRCUIT_DIR
+
+    results: list[dict[str, object]] = []
+    for n in n_points:
+        out_path = os.path.join(
+            os.fspath(out_dir),
+            f"hypercubeW_channel_lcu_basic_no_n{n}_nam_qasm2.qasm",
+        )
+        results.append(export_hypercube_channel_lcu_nam_qasm2(n=n, out_path=out_path))
+    return results
+
+
+def export_hypercube_channel_lcu_ibm_qasm2_batch(
+    n_points: list[int] | None = None,
+    out_dir: str | os.PathLike | None = None,
+) -> list[dict[str, object]]:
+    if n_points is None:
+        n_points = HYPERCUBEW_BASELINE_N_POINTS
+    if out_dir is None:
+        out_dir = HYPERCUBEW_CIRCUIT_DIR
+
+    results: list[dict[str, object]] = []
+    for n in n_points:
+        out_path = os.path.join(
+            os.fspath(out_dir),
+            f"hypercubeW_channel_lcu_basic_no_n{n}_ibm_qasm2.qasm",
+        )
+        results.append(export_hypercube_channel_lcu_ibm_qasm2(n=n, out_path=out_path))
+    return results
 
 
 def print_table(rows: list[dict[str, int | str | float]]) -> None:

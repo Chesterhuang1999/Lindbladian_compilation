@@ -510,7 +510,7 @@ class channel:
             else:
                 raise ValueError("Cannot infer channel dimension from zero Kraus operators only")
 
-        dense = np.zeros((dim, dim), dtype=complex)
+        dense = np.zeros((dim, dim), dtype=complex) # type: ignore
         for inst, coeff in op.instances:
             dense += coeff * inst.to_operator().data
         return dense
@@ -622,6 +622,109 @@ class channel:
         return np.array([int(np.sum(np.abs(A[i]) > tol)) for i in range(A.shape[0])])
 
     @staticmethod
+    def _canonical_state_key(A, tol=1e-12, decimals=10):
+        """
+        Canonical key for beam-state deduplication.
+
+        Row order and per-row global phases do not affect the represented Kraus
+        family for the support search, so normalize those away before rounding.
+        """
+        B = A.copy()
+        B[np.abs(B) < tol] = 0.0
+
+        rows = []
+        for row in B:
+            normalized = row.copy()
+            nz = np.flatnonzero(np.abs(normalized) > tol)
+            if len(nz) > 0:
+                normalized *= np.exp(-1j * np.angle(normalized[nz[0]]))
+                normalized[np.abs(normalized) < tol] = 0.0
+            row_key = tuple(
+                (round(float(val.real), decimals), round(float(val.imag), decimals))
+                for val in normalized
+            )
+            rows.append(row_key)
+
+        return tuple(sorted(rows))
+
+    @staticmethod
+    def _quantized_ratio_key(ratio, tol=1e-12, decimals=10):
+        if abs(ratio) <= tol:
+            return (0.0, 0.0)
+        return (round(float(ratio.real), decimals), round(float(ratio.imag), decimals))
+
+    @staticmethod
+    def _pair_future_potential(A, i, j, tol=1e-12):
+        """
+        Estimate how useful a row pair is for a future 2-row cancellation.
+
+        Shared columns are grouped by coefficient ratio A[i,k]/A[j,k].
+        One rotation can cancel all columns in one ratio class. Singleton
+        columns become nonzero in both rows after a generic rotation, so they
+        are counted as cancellation cost.
+
+        Returns a lexicographic score dictionary. The leading value is
+        future_margin = max_aligned_ratio_class_size - singleton_count.
+        """
+        ri, rj = A[i], A[j]
+        ratio_classes = defaultdict(int)
+        shared = 0
+        singleton = 0
+
+        for ai, aj in zip(ri, rj):
+            ai_nz = abs(ai) > tol
+            aj_nz = abs(aj) > tol
+            if ai_nz and aj_nz:
+                shared += 1
+                ratio = ai / aj
+                ratio_classes[channel._quantized_ratio_key(ratio, tol)] += 1
+            elif ai_nz or aj_nz:
+                singleton += 1
+
+        max_aligned = max(ratio_classes.values(), default=0)
+        margin = max_aligned - singleton
+        multi_aligned = sum(count for count in ratio_classes.values() if count >= 2)
+
+        return {
+            'margin': margin,
+            'max_aligned': max_aligned,
+            'singleton': singleton,
+            'shared': shared,
+            'multi_aligned': multi_aligned,
+            'score': (margin, max_aligned, -singleton, shared, multi_aligned),
+        }
+
+    @staticmethod
+    def _pair_shared_support(A, i, j, tol=1e-12):
+        """Number of Pauli columns that are nonzero in both rows i and j."""
+        return int(np.sum((np.abs(A[i]) > tol) & (np.abs(A[j]) > tol)))
+
+    @staticmethod
+    def _local_future_potential(A, touched_rows, tol=1e-12):
+        """
+        Best future-potential score among row pairs touching one of touched_rows.
+        """
+        touched = set(touched_rows)
+        m = A.shape[0]
+        best = {
+            'margin': -10**9,
+            'max_aligned': 0,
+            'singleton': 10**9,
+            'shared': 0,
+            'multi_aligned': 0,
+            'score': (-10**9, 0, -10**9, 0, 0),
+        }
+
+        for p, q in combinations(range(m), 2):
+            if p not in touched and q not in touched:
+                continue
+            potential = channel._pair_future_potential(A, p, q, tol)
+            if potential['score'] > best['score']:
+                best = potential
+
+        return best
+
+    @staticmethod
     def _apply_unitary(A, i, j, U):
         """
         Apply a 2x2 unitary U to rows i, j of matrix A (on a copy).
@@ -690,6 +793,114 @@ class channel:
         return unitaries
 
     @staticmethod
+    def _unitary_key(U, tol=1e-12, decimals=10):
+        V = U.copy()
+        V[np.abs(V) < tol] = 0.0
+        return tuple(
+            (round(float(val.real), decimals), round(float(val.imag), decimals))
+            for val in V.reshape(-1)
+        )
+
+    @staticmethod
+    def _rotation_candidates_for_pair(
+        A,
+        i,
+        j,
+        tol=1e-12,
+        keep_neutral=True,
+        max_neutral_candidates=3,
+    ):
+        """
+        Return useful 2-row rewrite candidates for a pair.
+
+        Strictly improving candidates are always kept. Equal-support candidates
+        are kept only when they improve local future-cancellation potential, or
+        when they improve secondary tie-breakers such as aligned overlap and
+        singleton count. This preserves plateau moves that can unlock later
+        reductions without flooding the beam with all neutral rotations.
+        """
+        row_supports = channel._row_supports(A, tol)
+        old_pair_support = int(row_supports[i] + row_supports[j])
+        old_total_support = int(np.sum(row_supports))
+        before_potential = channel._local_future_potential(A, (i, j), tol)
+
+        candidates = []
+        seen_unitaries = set()
+
+        for U in channel._candidate_unitaries_for_pair(A, i, j, tol):
+            unitary_key = channel._unitary_key(U, tol)
+            if unitary_key in seen_unitaries:
+                continue
+            seen_unitaries.add(unitary_key)
+
+            B = channel._apply_unitary(A, i, j, U)
+            B[np.abs(B) < tol] = 0.0
+            if np.allclose(B, A, atol=tol, rtol=tol):
+                continue
+
+            new_pair_support = int(np.sum(np.abs(B[i]) > tol) + np.sum(np.abs(B[j]) > tol))
+            pair_delta = new_pair_support - old_pair_support
+            new_total_support = old_total_support + pair_delta
+            if new_total_support > old_total_support:
+                continue
+
+            after_potential = channel._local_future_potential(B, (i, j), tol)
+            potential_delta = tuple(
+                a - b for a, b in zip(after_potential['score'], before_potential['score'])
+            )
+
+            if new_total_support < old_total_support:
+                reason = 'improve'
+                keep = True
+            elif keep_neutral:
+                reason = 'neutral'
+                keep = after_potential['score'] > before_potential['score']
+            else:
+                reason = 'neutral'
+                keep = False
+
+            if not keep:
+                continue
+
+            # Lower sort_key is better. Improving support dominates heuristic
+            # potential; neutral candidates are ranked by future-cancellation
+            # score and secondary structural improvements.
+            sort_key = (
+                new_total_support,
+                0 if reason == 'improve' else 1,
+                -after_potential['margin'],
+                -after_potential['max_aligned'],
+                after_potential['singleton'],
+                -after_potential['shared'],
+                -after_potential['multi_aligned'],
+            )
+            candidates.append(
+                {
+                    'pair': (i, j),
+                    'U': U,
+                    'support': new_total_support,
+                    'A': B,
+                    'pair_delta': pair_delta,
+                    'reason': reason,
+                    'before_potential': before_potential,
+                    'after_potential': after_potential,
+                    'potential_delta': potential_delta,
+                    'sort_key': sort_key,
+                }
+            )
+
+        improving = [c for c in candidates if c['reason'] == 'improve']
+        neutral = [c for c in candidates if c['reason'] == 'neutral']
+
+        improving.sort(key=lambda c: c['sort_key'])
+        neutral.sort(key=lambda c: c['sort_key'])
+
+        if max_neutral_candidates is not None:
+            neutral = neutral[:max_neutral_candidates]
+
+        return improving + neutral
+
+    @staticmethod
     def _best_unitary_for_pair(A, i, j, tol=1e-12):
         """
         Find the 2x2 unitary among the generated candidates that minimizes
@@ -698,28 +909,18 @@ class channel:
         Returns:
             (best_U, best_support, best_A)
         """
-        row_supports = channel._row_supports(A, tol)
-        old_pair_support = int(row_supports[i] + row_supports[j])
-        total_support = int(np.sum(row_supports))
-        unaffected_support = total_support - old_pair_support
-        candidates = channel._candidate_unitaries_for_pair(A, i, j, tol)
+        candidates = channel._rotation_candidates_for_pair(
+            A,
+            i,
+            j,
+            tol=tol,
+            keep_neutral=False,
+        )
+        if not candidates:
+            return np.eye(2, dtype=complex), channel._support(A, tol), A
 
-        best_U = np.eye(2, dtype=complex)
-        best_pair_support = old_pair_support
-        best_support = total_support
-        best_A = A
-
-        for U in candidates:
-            B = channel._apply_unitary(A, i, j, U)
-            B[np.abs(B) < tol] = 0.0
-            new_pair_support = int(np.sum(np.abs(B[i]) > tol) + np.sum(np.abs(B[j]) > tol))
-            if new_pair_support < best_pair_support:
-                best_pair_support = new_pair_support
-                best_support = unaffected_support + new_pair_support
-                best_U = U
-                best_A = B
-
-        return best_U, best_support, best_A
+        best = min(candidates, key=lambda c: c['sort_key'])
+        return best['U'], best['support'], best['A']
 
     def rewrite_search(self, strategy='greedy', beam_width=3, max_steps=50,
                        tol=1e-12, verbose=False, strict_beam=False):
@@ -764,6 +965,35 @@ class channel:
             )
         else:
             raise ValueError(f"Unknown strategy: {strategy}")
+
+    def gatecost_rewrite_search(self, strategy='beam', beam_width=8, max_steps=50,
+                                tol=1e-12, verbose=False, keep_neutral=False,
+                                max_neutral_candidates=3,
+                                skip_disjoint_pairs=True):
+        """
+        Gate-cost-guided rewrite search using the H_length heuristic.
+
+        This is a separate entry point from rewrite_search(), which preserves
+        the existing support-minimization behavior.  The implementation lives
+        in channelIR_gatecost_rewrite_search.py to keep the gate-cost heuristic
+        modular and easier to evolve.
+        """
+        try:
+            from .channelIR_gatecost_rewrite_search import gatecost_rewrite_search
+        except ImportError:
+            from channelIR_gatecost_rewrite_search import gatecost_rewrite_search
+
+        return gatecost_rewrite_search(
+            self,
+            strategy=strategy,
+            beam_width=beam_width,
+            max_steps=max_steps,
+            tol=tol,
+            verbose=verbose,
+            keep_neutral=keep_neutral,
+            max_neutral_candidates=max_neutral_candidates,
+            skip_disjoint_pairs=skip_disjoint_pairs,
+        )
 
     def _greedy_search(self, A, labels, m, initial_support, max_steps, tol, verbose):
         """
@@ -839,65 +1069,102 @@ class channel:
     def _beam_search(self, A, labels, m, initial_support, beam_width, max_steps, tol, verbose, strict_beam):
         """
         Beam search: maintain top beam_width states, expand all pair unitaries.
-        Allows zero-gain steps to escape local minima.
+        Allows heuristic zero-gain steps to cross plateaus, while using a
+        canonical visited set to avoid cycling through neutral rewrites.
         """
-        # State: (support, A_matrix, steps_list)
-        beam = [(initial_support, A.copy(), [])]
-        global_best = (initial_support, A.copy(), [])
+        # State: (support, heuristic_sort_key, A_matrix, steps_list, metadata_list)
+        initial_key = self._canonical_state_key(A, tol)
+        beam = [(initial_support, (initial_support,), A.copy(), [], [])]
+        visited = {initial_key}
+        global_best = (initial_support, A.copy(), [], [])
         best_support_trajectory = [initial_support]
         stop_reason = "max_steps_reached"
         iterations = 0
+        frontier_sizes = []
+        generated_counts = []
+        accepted_counts = []
 
         for step in range(max_steps):
             iterations += 1
             candidates = []
+            generated = 0
+            accepted = 0
 
-            for sup, state_A, state_steps in beam:
+            for sup, _, state_A, state_steps, state_metadata in beam:
                 for i, j in combinations(range(m), 2):
-                    U, new_sup, new_A = self._best_unitary_for_pair(state_A, i, j, tol)
-                    # Accept policy for beam expansion.
-                    if (strict_beam and new_sup < sup) or ((not strict_beam) and new_sup <= sup):
-                        new_steps = state_steps + [((i, j), U, new_sup)]
-                        candidates.append((new_sup, new_A, new_steps))
+                    if self._pair_shared_support(state_A, i, j, tol) == 0:
+                        continue
+
+                    pair_candidates = self._rotation_candidates_for_pair(
+                        state_A,
+                        i,
+                        j,
+                        tol=tol,
+                        keep_neutral=not strict_beam,
+                    )
+                    generated += len(pair_candidates)
+
+                    for cand in pair_candidates:
+                        new_sup = cand['support']
+                        if (strict_beam and new_sup >= sup) or ((not strict_beam) and new_sup > sup):
+                            continue
+
+                        new_A = cand['A']
+                        state_key = self._canonical_state_key(new_A, tol)
+                        if state_key in visited:
+                            continue
+                        visited.add(state_key)
+                        accepted += 1
+
+                        new_steps = state_steps + [(cand['pair'], cand['U'], new_sup)]
+                        new_metadata = state_metadata + [
+                            {
+                                'reason': cand['reason'],
+                                'pair_delta': cand['pair_delta'],
+                                'after_future_margin': cand['after_potential']['margin'],
+                                'after_max_aligned': cand['after_potential']['max_aligned'],
+                                'after_singleton': cand['after_potential']['singleton'],
+                            }
+                        ]
+                        candidates.append((new_sup, cand['sort_key'], new_A, new_steps, new_metadata))
 
                         if new_sup < global_best[0]:
-                            global_best = (new_sup, new_A.copy(), list(new_steps))
+                            global_best = (new_sup, new_A.copy(), list(new_steps), list(new_metadata))
 
             if not candidates:
-                stop_reason = "no_candidates"
+                stop_reason = "frontier_exhausted"
                 if verbose:
-                    print(f"  Step {step}: no candidates, stopping.")
+                    print(f"  Step {step}: no unseen non-increasing candidates, stopping.")
                 break
 
-            # Deduplicate by support signature (row supports as tuple)
+            # Deduplicate any same-layer collisions that survived the global
+            # visited check due to numerical near-equality.
             seen = {}
-            for sup, cA, csteps in candidates:
-                key = tuple(sorted(self._row_supports(cA, tol)))
-                if key not in seen or sup < seen[key][0]:
-                    seen[key] = (sup, cA, csteps)
+            for sup, sort_key, cA, csteps, cmeta in candidates:
+                key = self._canonical_state_key(cA, tol)
+                if key not in seen or sort_key < seen[key][1]:
+                    seen[key] = (sup, sort_key, cA, csteps, cmeta)
 
-            unique = sorted(seen.values(), key=lambda x: x[0])
+            unique = sorted(seen.values(), key=lambda x: x[1])
             beam = unique[:beam_width]
+            frontier_sizes.append(len(beam))
+            generated_counts.append(generated)
+            accepted_counts.append(accepted)
 
             if verbose:
-                supports = [s for s, _, _ in beam]
-                print(f"  Step {step}: beam supports = {supports}, global best = {global_best[0]}")
+                supports = [s for s, _, _, _, _ in beam]
+                print(
+                    f"  Step {step}: generated={generated}, accepted={accepted}, "
+                    f"beam supports={supports}, global best={global_best[0]}"
+                )
 
             best_support_trajectory.append(global_best[0])
-
-            # Early termination: if global best hasn't improved in this step
-            if beam[0][0] >= global_best[0] and step > 0:
-                # Check if all beam states are at or above global best
-                if all(s >= global_best[0] for s, _, _ in beam):
-                    stop_reason = "converged"
-                    if verbose:
-                        print(f"  Step {step}: beam converged at support={global_best[0]}")
-                    break
 
         return {
             'initial_support': initial_support,
             'final_support': global_best[0],
             'steps': global_best[2],
+            'step_metadata': global_best[3],
             'A_final': global_best[1],
             'labels': labels,
             'termination': {
@@ -906,6 +1173,10 @@ class channel:
                 'max_steps': max_steps,
                 'support_trajectory': best_support_trajectory,
                 'strict_beam': strict_beam,
+                'frontier_sizes': frontier_sizes,
+                'generated_counts': generated_counts,
+                'accepted_counts': accepted_counts,
+                'visited_states': len(visited),
             },
         }
 
@@ -936,22 +1207,6 @@ class channel:
         self.kraus_ops = new_kraus_ops
         return self
 
-    # def unitary_transform(self, U: np.ndarray, indices: list):
-    #     """
-    #     Perform a general unitary transform over Kraus operator {K1, ... Kn}.
-    #     """
-    #     assert U.conj().T @ U == np.eye(U.shape[0]), "U must be unitary"
-    #     assert U.shape[0] == U.shape[1] == len(indices), "U must be square and match the number of indices"
-    #     assert max(indices) < len(self.kraus_ops), "Indices must be within the range of Kraus operators"
-
-    #     new_kraus_ops = [deepcopy(k) for k in self.kraus_ops]
-    #     for i in range(len(indices)):
-    #         new_op = Matrixsum([])
-    #         for j in range(len(indices)):
-    #             new_op = new_op.add(self.kraus_ops[indices[j]].mul_coeffs(U[i, j]))
-    #         new_kraus_ops[indices[i]] = new_op
-
-    #     self.kraus_ops = new_kraus_ops
 
 
 class channel_ensemble:
@@ -1002,11 +1257,13 @@ if __name__ == "__main__":
     # print(ms_mul.operator_norm())
     # for inst, c in ms_mul.instances:
     #     print(inst, c)
-    k1 = Matrixsum([(PauliAtom("XX", 1.0), 1.0), (PauliAtom("YY", 1.0), 1.0), (PauliAtom("ZZ", -1.0), 1.0)])
-    k2 = Matrixsum([(PauliAtom("XX", 1.0j), 1.0), (PauliAtom("YY", -1.0), 1.0), (PauliAtom("IZ", -1.0), 1.0)])
-    k3 = Matrixsum([(PauliAtom("XX", 1.0), 0.5), (PauliAtom("YY", 1.0), 1.3), (PauliAtom("ZZ", -1.0), 0.8)])
-    k4 = Matrixsum([(PauliAtom("XX", -1.0j), 1.0), (PauliAtom("YY", 1.0), 1.0), (PauliAtom("IZ", 1.0), 0.4)])
-    ch = channel([k1, k2, k3, k4])
+    k1 = Matrixsum([(PauliAtom("XX", 1.0), 1.0), (PauliAtom("YY", 1.0), 1.0), (PauliAtom("ZZ", 1.0), 1.0)])
+    k2 = Matrixsum([(PauliAtom("XX", 1.0), 1.0), (PauliAtom("ZX", 1.0), 1.0), (PauliAtom("YZ", 1.0), 1.0)])
+    k3 = Matrixsum([(PauliAtom("YY", 1.0), 1.0), (PauliAtom("ZX", 1.0), 1.0), (PauliAtom("ZZ", 1.0), 1.0)]) 
+    # k2 = Matrixsum([(PauliAtom("XX", 1.0j), 1.0), (PauliAtom("YY", -1.0), 1.0), (PauliAtom("IZ", -1.0), 1.0)])
+    # k3 = Matrixsum([(PauliAtom("XX", 1.0), 0.5), (PauliAtom("YY", 1.0), 1.3), (PauliAtom("ZZ", -1.0), 0.8)])
+    # k4 = Matrixsum([(PauliAtom("XX", -1.0j), 1.0), (PauliAtom("YY", 1.0), 1.0), (PauliAtom("IZ", 1.0), 0.4)])
+    ch = channel([k1, k2, k3])
     result = ch.rewrite_search(strategy='beam')
     ch.apply_rewrite_result(result)
     print(result)

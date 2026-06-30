@@ -212,8 +212,9 @@ def channel_to_LCU (ensem: channel_ensemble, structure = 'basic', opt = 'No') ->
     sys_size = max([ms.size for ms in channel])
     ## 2* select size is the count of Kraus operators (j)
     select_size = int(np.ceil(np.log2(len(channel))))
+    block_circuits = [BlockEncoding(ms).circuit(opt = opt) for ms in channel]
     ### 2**ctrl size is the count of Pauli terms (k) in each Kraus operator.  k indexes before j.
-    ctrl_size = max([ms.ctrl_size for ms in channel])
+    ctrl_size = max([qc_be_ms.num_qubits - sys_size for qc_be_ms in block_circuits])
 
     ## Channels are viewed as Kraus operators (matrixsums)
     coeff_sums = [ms.pauli_norm() for ms in channel]
@@ -229,10 +230,9 @@ def channel_to_LCU (ensem: channel_ensemble, structure = 'basic', opt = 'No') ->
         select = QuantumRegister(select_size, 's')
         qc = QuantumCircuit(select, ctrl, sys)
         qc.compose(LCU_ini, qubits=list(range(select_size)), inplace=True) 
-        for i, ms in enumerate(channel):
+        for i, qc_be_ms in enumerate(block_circuits):
             ctrl_value = bin(i)[2:].zfill(select_size)
             ctrl_v_rev = ctrl_value[::-1]
-            qc_be_ms = BlockEncoding(ms).circuit(opt = opt)
             # print(qc_be_ms.draw())
             ctrl_size_ms = qc_be_ms.num_qubits - sys_size
             # U_be_ms = qc_be_ms.to_gate().control(num_ctrl_qubits=select_size, ctrl_state=ctrl_value)
@@ -241,7 +241,6 @@ def channel_to_LCU (ensem: channel_ensemble, structure = 'basic', opt = 'No') ->
             qubit_indexes = [list(range(ctrl_size)), list(range(ctrl_size, ctrl_size + select_size)), 
                              list(range(ctrl_size + select_size, ctrl_size + select_size + sys_size))]
     elif structure == 'opt':
-        circuits = []
         qc = QuantumCircuit(2 * select_size + ctrl_size + sys_size)
         
         select_indexes = [2 * j for j in range(select_size)]
@@ -249,13 +248,8 @@ def channel_to_LCU (ensem: channel_ensemble, structure = 'basic', opt = 'No') ->
         ctrl_indexes = list(range(2 * select_size, 2 * select_size + ctrl_size))
         sys_indexes = list(range(2 * select_size + ctrl_size, 2 * select_size + ctrl_size + sys_size))
         qc.compose(LCU_ini, qubits = select_indexes, inplace = True)
-        for i, ms in enumerate(channel):
-            qc_be_ms = BlockEncoding(ms).circuit(opt = opt)
-            circuits.append(qc_be_ms)
-        qc, tcount, mccount, cxcount = mulplex_U_opt(qc, circuits, select_size, ctrl_size , sys_size)
+        qc, tcount, mccount, cxcount = mulplex_U_opt(qc, block_circuits, select_size, ctrl_size , sys_size)
         qubit_indexes = [select_indexes, anc_indexes, ctrl_indexes, sys_indexes]
-    # qc.save_statevector('final_state') #type: ignore
-    # qubit_regs = [ctrl, select, sys]
     return [qc, qubit_indexes]
 
 

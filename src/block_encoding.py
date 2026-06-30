@@ -779,7 +779,7 @@ class BlockEncoding:
         cxcount = mccount * cx_count_per_ctrl
         return qc, tcount, mccount, cxcount
     ## Optimized version of multiplexed_u implementation (Babbush 2018)
-    def mulplex_U_opt(self, mat_list, ctrl_size, sys_size):
+    def mulplex_U_opt(self, mat_list, ctrl_size, sys_size, gateable=True):
 
         from qiskit.circuit.library import XGate
         mccount = 0
@@ -794,7 +794,8 @@ class BlockEncoding:
         anc_regs = [2 * (ctrl_size - 1 - j) for j in range(ctrl_size)]
         sel_regs = [2 * (ctrl_size - 1 - j) + 1 for j in range(ctrl_size)]
         def apply_left_enc(j):
-            opt_circuit.reset(anc_regs[j])
+            if not gateable:
+                opt_circuit.reset(anc_regs[j])
             ctrl_bval = control_values[j]
             ccxgate_c = XGate().control(num_ctrl_qubits = 2, ctrl_state = ctrl_bval + '1')
             cxgate_c  = XGate().control(num_ctrl_qubits = 1, ctrl_state = ctrl_bval)
@@ -812,7 +813,8 @@ class BlockEncoding:
                 opt_circuit.append(cxgate_c, [2 * ctrl_size - 1, anc_regs[0]])
             else:
                 opt_circuit.append(ccxgate_c, [anc_regs[j - 1], sel_regs[j], anc_regs[j]])
-            opt_circuit.reset(anc_regs[j])
+            if not gateable:
+                opt_circuit.reset(anc_regs[j])
 
         maxctrl_value = bin(len(mat_list) - 1)[2:].zfill(ctrl_size)
 
@@ -1196,17 +1198,17 @@ class BlockEncoding:
             "non_clifford_count": non_clifford_count,
         }
         return qc, stats
-    def select_circuit(self, opt = None):
+    def select_circuit(self, opt = None, gateable=True):
         if opt == 'No':
             qc_u, tcount, mccount, cxcount = self.mulplex_U(self.mat_list, self.ctrl_size, self.sys_size)
             return qc_u
         elif opt == 'Ctrl-line':
-            qc_u, tcount, mccount, cxcount = self.mulplex_U_opt(self.mat_list, self.ctrl_size, self.sys_size)
+            qc_u, tcount, mccount, cxcount = self.mulplex_U_opt(self.mat_list, self.ctrl_size, self.sys_size, gateable=gateable)
             return qc_u
         elif opt == 'Matrix-order':
             qc_u, tcount, mccount, cxcount, ctrl_size = self.mulplex_U_opt_order()
             return qc_u
-    def circuit(self, opt = None):
+    def circuit(self, opt = None, gateable=True):
         """
         Returns the block-encoding QuantumCircuit for the operator J.
         """
@@ -1216,6 +1218,8 @@ class BlockEncoding:
             sys = QuantumRegister(self.sys_size, 'sys')
             qc = QuantumCircuit(sys)
             if opt == 'No':
+                qc_u, tcount, mccount, cxcount = self.mulplex_U(self.mat_list, 0, self.sys_size)
+            elif opt == 'Ctrl-line':
                 qc_u, tcount, mccount, cxcount = self.mulplex_U(self.mat_list, 0, self.sys_size)
             elif opt == 'Matrix-order':
                 qc_u, tcount, mccount, cxcount = self.mulplex_U_opt_order(self.mat_list, 0, self.sys_size)
@@ -1233,7 +1237,7 @@ class BlockEncoding:
             qc.compose(qc_u, qubits=qc.qubits, inplace=True)
             qc.compose(qc_select.inverse(), qubits=ctrl, inplace=True) #type: ignore
         elif opt == 'Ctrl-line':
-            qc_u, tcount, mccount, cxcount = self.mulplex_U_opt(self.mat_list, self.ctrl_size, self.sys_size)
+            qc_u, tcount, mccount, cxcount = self.mulplex_U_opt(self.mat_list, self.ctrl_size, self.sys_size, gateable=gateable)
             qc = QuantumCircuit(qc_u.num_qubits, name = "BlockEncoding")
             qc_select = self.mulplex_B(self.coeff_list, self.ctrl_size)
             ctrl_index = [2 * j + 1 for j in range(self.ctrl_size)]

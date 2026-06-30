@@ -18,11 +18,13 @@ if str(SCRIPT_DIR) not in sys.path:
 from baseline_common import (  # noqa: E402
     compare_gate_stats,
     count_qasm_file,
+    load_qasm_stats_or_count,
     require_input_qasm,
     run_command,
     tail_text,
     write_summary,
 )
+from lower_voqc_qasm_to_nam import lower_voqc_qasm_file_to_nam  # noqa: E402
 from normalize_qasm_rz_for_voqc import normalize_qasm_file  # noqa: E402
 
 
@@ -54,7 +56,10 @@ def parse_voqc_counts(text: str) -> dict[str, dict[str, int | None]]:
 
 def run(args: argparse.Namespace) -> dict[str, Any]:
     input_path = require_input_qasm(Path(args.input))
-    input_stats = count_qasm_file(input_path)
+    input_stats = load_qasm_stats_or_count(
+        input_path,
+        stats_path=Path(args.input_stats).resolve() if args.input_stats else None,
+    )
     gate_set = str(input_stats["detected_gate_set"])
     if gate_set != "nam":
         raise ValueError("VOQC baseline is NAM-only in this workflow; IBM input is not supported.")
@@ -68,6 +73,7 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         tmp_dir_path = Path(tmp_dir)
         normalized_input = tmp_dir_path / "input_voqc_normalized.qasm"
         actual_output_path = output_path or (tmp_dir_path / "optimized.qasm")
+        actual_output_path.parent.mkdir(parents=True, exist_ok=True)
         replacements = normalize_qasm_file(input_path, normalized_input)
         normalized_stats = count_qasm_file(normalized_input, gate_set=gate_set)
 
@@ -77,8 +83,17 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
 
         proc = run_command(command, timeout=args.timeout)
         output_exists = actual_output_path.exists()
+        lowered_output_path = actual_output_path.with_name(
+            f"{actual_output_path.stem}_nam_lowered.qasm"
+        )
+        lowering_info = None
+        if output_exists:
+            lowering_info = lower_voqc_qasm_file_to_nam(
+                actual_output_path,
+                lowered_output_path,
+            )
         output_stats = (
-            count_qasm_file(actual_output_path, gate_set=gate_set)
+            count_qasm_file(lowered_output_path, gate_set=gate_set)
             if output_exists
             else None
         )
@@ -95,6 +110,10 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
             "detected_gate_set": gate_set,
             "kept_output": output_path is not None,
             "output_qasm": str(actual_output_path) if output_path is not None else None,
+            "lowered_output_qasm": str(lowered_output_path)
+            if output_path is not None and output_exists
+            else None,
+            "output_basis_lowering": lowering_info,
             "rz_angle_normalization": {
                 "replacements": replacements,
                 "stats": normalized_stats,
@@ -127,6 +146,7 @@ def build_parser() -> argparse.ArgumentParser:
         description="Normalize RZ angles, run VOQC on one NAM QASM input, and report gate counts."
     )
     parser.add_argument("--input", required=True, help="Input OpenQASM2 file.")
+    parser.add_argument("--input-stats", default=None, help="Optional cached input stats JSON.")
     parser.add_argument("--output", default=None, help="Optional path to keep optimized QASM.")
     parser.add_argument("--summary", default=None, help="Optional JSON summary path.")
     parser.add_argument("--voqc", default=str(DEFAULT_VOQC), help="VOQC executable.")

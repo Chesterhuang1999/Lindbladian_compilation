@@ -277,7 +277,7 @@ def prep_sup_state(coeffs: list) -> QuantumCircuit:
     qc.append(prep_gate, range(qubit_length))
     return qc
 
-def mulplex_U_opt(opt_circuit, circuits, ctrl_size, sub_ctrl_size, sys_size):
+def mulplex_U_opt(opt_circuit, circuits, ctrl_size, sub_ctrl_size, sys_size, gateable=True):
 
     from qiskit.circuit.library import XGate
     mccount = 0
@@ -292,7 +292,8 @@ def mulplex_U_opt(opt_circuit, circuits, ctrl_size, sub_ctrl_size, sys_size):
     # anc_regs = [2 * (ctrl_size - 1 - j) for j in range(ctrl_size)]
     # sel_regs = [2 * (ctrl_size - 1 - j) + 1 for j in range(ctrl_size)]
     def apply_left_enc(j):
-        opt_circuit.reset(anc_regs[j])
+        if not gateable:
+            opt_circuit.reset(anc_regs[j])
         ctrl_bval = control_values[j]
         ccxgate_c = XGate().control(num_ctrl_qubits = 2, ctrl_state = ctrl_bval + '1')
         cxgate_c  = XGate().control(num_ctrl_qubits = 1, ctrl_state = ctrl_bval)
@@ -310,7 +311,8 @@ def mulplex_U_opt(opt_circuit, circuits, ctrl_size, sub_ctrl_size, sys_size):
             opt_circuit.append(cxgate_c, [0, anc_regs[0]])
         else:
             opt_circuit.append(ccxgate_c, [anc_regs[j - 1], sel_regs[j], anc_regs[j]])
-        opt_circuit.reset(anc_regs[j])
+        if not gateable:
+            opt_circuit.reset(anc_regs[j])
     
     for i, circ in enumerate(circuits):
         ctrl_numq = circ.num_qubits - sys_size
@@ -335,7 +337,11 @@ def mulplex_U_opt(opt_circuit, circuits, ctrl_size, sub_ctrl_size, sys_size):
                                list(range(2 * ctrl_size - 1, 2 * ctrl_size + ctrl_numq)) + 
                                list(range(sys_start, sys_start + sys_size)))
             
-            opt_circuit.cx(anc_regs[ctrl_size - 2], anc_regs[ctrl_size - 1])
+            if ctrl_size >= 2:
+                opt_circuit.cx(anc_regs[ctrl_size - 2], anc_regs[ctrl_size - 1])
+                cxcount += 1
+            else:
+                opt_circuit.x(anc_regs[0])
             cxcount += sub_tcount
             mccount += sub_cxcount
         elif i == len(circuits) - 1:
