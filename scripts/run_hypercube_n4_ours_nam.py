@@ -66,6 +66,7 @@ def rewrite_channel(
     beam_width: int,
     max_steps: int,
     tol: float,
+    verbose: bool = False,
 ) -> tuple[list, dict[str, Any], float]:
     started = time.perf_counter()
     rewrite_source = ChannelIR(copy.deepcopy(kraus_ops))
@@ -75,6 +76,7 @@ def rewrite_channel(
         beam_width=beam_width,
         max_steps=max_steps,
         tol=tol,
+        verbose=verbose,
     )
 
     rewritten = ChannelIR(copy.deepcopy(kraus_ops))
@@ -373,7 +375,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--num-qubits", type=int, default=4)
     parser.add_argument("--out-dir", type=Path, default=DEFAULT_OUT_DIR)
     parser.add_argument("--table1-raw-qasm", type=Path, default=DEFAULT_TABLE1_RAW_QASM)
-    parser.add_argument("--rewrite-strategy", choices=("greedy", "beam"), default="greedy")
+    parser.add_argument("--rewrite-strategy", choices=("greedy", "greedy_incremental", "beam"), default="greedy")
     parser.add_argument("--beam-width", type=int, default=3)
     parser.add_argument("--max-steps", type=int, default=50)
     parser.add_argument("--tol", type=float, default=1e-12)

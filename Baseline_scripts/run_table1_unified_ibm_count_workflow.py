@@ -304,6 +304,118 @@ def write_workflow_input_qasm(input_qasm: Path, output_qasm: Path) -> dict[str, 
     return renames
 
 
+def qiskit_opt3_requested(args: argparse.Namespace, basis: str) -> bool:
+    mode = str(args.qiskit_opt3_basis)
+    if bool(args.skip_qiskit_opt3):
+        return False
+    if mode == "both":
+        return True
+    if mode == "final":
+        return basis == str(args.final_count_basis)
+    return basis == mode
+
+
+def run_qiskit_opt3_external_input(
+    *,
+    input_qasm: Path,
+    output_qasm: Path,
+    basis: str,
+    timeout: float | None,
+) -> dict[str, Any]:
+    if basis == "ibm":
+        basis_gates = IBM_BASIS
+    elif basis == "nam":
+        basis_gates = NAM_BASIS
+    else:
+        raise ValueError(f"Unsupported qiskit opt3 basis: {basis}")
+
+    helper = (
+        "import sys\n"
+        "from pathlib import Path\n"
+        "from qiskit import QuantumCircuit, transpile\n"
+        f"sys.path.insert(0, {str(SRC_DIR)!r})\n"
+        "from qasm_export import export_openqasm2_quartz_input\n"
+        "input_qasm = Path(sys.argv[1])\n"
+        "output_qasm = Path(sys.argv[2])\n"
+        "basis_gates = tuple(sys.argv[3].split(','))\n"
+        "qc = QuantumCircuit.from_qasm_file(str(input_qasm))\n"
+        "tqc = transpile(qc, basis_gates=list(basis_gates), optimization_level=3)\n"
+        "export_openqasm2_quartz_input(tqc, output_qasm, basis_gates=basis_gates)\n"
+    )
+    command = [
+        sys.executable,
+        "-c",
+        helper,
+        str(input_qasm),
+        str(output_qasm),
+        ",".join(basis_gates),
+    ]
+    started = time.perf_counter()
+    proc = None
+    try:
+        proc = subprocess.Popen(
+            command,
+            cwd=str(ROOT),
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            start_new_session=True,
+        )
+        stdout, stderr = proc.communicate(timeout=timeout)
+        returncode = proc.returncode
+        timed_out = False
+    except subprocess.TimeoutExpired:
+        timed_out = True
+        if proc is not None:
+            try:
+                os.killpg(proc.pid, signal.SIGTERM)
+            except (ProcessLookupError, PermissionError):
+                pass
+            try:
+                stdout, stderr = proc.communicate(timeout=5)
+            except subprocess.TimeoutExpired:
+                try:
+                    os.killpg(proc.pid, signal.SIGKILL)
+                except (ProcessLookupError, PermissionError):
+                    pass
+                stdout, stderr = proc.communicate()
+            returncode = proc.returncode
+        else:
+            stdout = ""
+            stderr = ""
+            returncode = None
+
+    if isinstance(stdout, bytes):
+        stdout = stdout.decode("utf-8", errors="replace")
+    if isinstance(stderr, bytes):
+        stderr = stderr.decode("utf-8", errors="replace")
+
+    elapsed = time.perf_counter() - started
+    status = "timeout" if timed_out else ("ok" if returncode == 0 and output_qasm.exists() else "failed")
+    stats = None
+    error = None
+    if status == "ok":
+        stats = count_qasm_file(output_qasm, gate_set=basis)
+        if basis == "nam":
+            stats["rz_angle_breakdown"] = rz_angle_breakdown(output_qasm)
+    elif stderr:
+        error = stderr[-4000:]
+    return {
+        "basis": basis,
+        "status": status,
+        "command": command,
+        "returncode": returncode,
+        "timed_out": timed_out,
+        "elapsed_seconds": float(elapsed),
+        "timeout_seconds": timeout,
+        "qasm": str(output_qasm) if output_qasm.exists() else None,
+        "stats": stats,
+        "error": error,
+        "stdout_tail": stdout[-4000:],
+        "stderr_tail": stderr[-4000:],
+    }
+
+
 def cached_external_input_stats(source_qasm: Path, copied_qasm: Path, basis: str) -> dict[str, Any] | None:
     cache_path = ROOT / "Baseline_results" / "tfim_external_baseline_inputs_summary.json"
     if not cache_path.exists():
@@ -337,6 +449,7 @@ def build_inputs(args: argparse.Namespace, work_dir: Path) -> dict[str, Any]:
     ibm_opt3_qasm = work_dir / f"{prefix}_ibm_opt3_qiskit.qasm"
     nam_opt0_qasm = work_dir / f"{prefix}_nam_opt0.qasm"
     nam_opt3_qasm = work_dir / f"{prefix}_nam_opt3_qiskit.qasm"
+    qiskit_opt3_results: dict[str, dict[str, Any] | None] = {"ibm": None, "nam": None}
 
     external_nam_qasm = resolve_circuits_qasm_input(
         getattr(args, "nam_qasm", None),
@@ -368,9 +481,17 @@ def build_inputs(args: argparse.Namespace, work_dir: Path) -> dict[str, Any]:
         logical_stats = qiskit_stats(logical_qc)
 
         ibm_opt0 = transpile(logical_qc, basis_gates=list(IBM_BASIS), optimization_level=0)
-        ibm_opt3 = transpile(logical_qc, basis_gates=list(IBM_BASIS), optimization_level=3)
         nam_opt0 = transpile(logical_qc, basis_gates=list(NAM_BASIS), optimization_level=0)
-        nam_opt3 = transpile(logical_qc, basis_gates=list(NAM_BASIS), optimization_level=3)
+        ibm_opt3 = (
+            transpile(logical_qc, basis_gates=list(IBM_BASIS), optimization_level=3)
+            if qiskit_opt3_requested(args, "ibm")
+            else None
+        )
+        nam_opt3 = (
+            transpile(logical_qc, basis_gates=list(NAM_BASIS), optimization_level=3)
+            if qiskit_opt3_requested(args, "nam")
+            else None
+        )
     else:
         assert external_nam_qasm is not None
         assert external_ibm_qasm is not None
@@ -388,20 +509,31 @@ def build_inputs(args: argparse.Namespace, work_dir: Path) -> dict[str, Any]:
             "ibm": cached_external_input_stats(external_ibm_qasm, ibm_opt0_qasm, "ibm"),
         }
 
-        if bool(args.skip_qiskit_opt3):
-            ibm_opt3 = None
-            nam_opt3 = None
-        else:
-            # These inputs are already in the requested basis.  The QASM readback is
-            # only used to run the Qiskit opt3 baseline on the same canonical input.
-            ibm_opt0 = QuantumCircuit.from_qasm_file(str(ibm_opt0_qasm))
-            nam_opt0 = QuantumCircuit.from_qasm_file(str(nam_opt0_qasm))
-            ibm_opt3 = transpile(ibm_opt0, basis_gates=list(IBM_BASIS), optimization_level=3)
-            nam_opt3 = transpile(nam_opt0, basis_gates=list(NAM_BASIS), optimization_level=3)
+        ibm_opt3 = None
+        nam_opt3 = None
 
     if not external_lowered_inputs:
         export_openqasm2_quartz_input(ibm_opt0, ibm_opt0_qasm, basis_gates=IBM_BASIS)
         export_openqasm2_quartz_input(nam_opt0, nam_opt0_qasm, basis_gates=NAM_BASIS)
+    else:
+        opt3_timeout = (
+            None if float(args.qiskit_opt3_timeout) <= 0 else float(args.qiskit_opt3_timeout)
+        )
+        if qiskit_opt3_requested(args, "ibm"):
+            qiskit_opt3_results["ibm"] = run_qiskit_opt3_external_input(
+                input_qasm=ibm_opt0_qasm,
+                output_qasm=ibm_opt3_qasm,
+                basis="ibm",
+                timeout=opt3_timeout,
+            )
+        if qiskit_opt3_requested(args, "nam"):
+            qiskit_opt3_results["nam"] = run_qiskit_opt3_external_input(
+                input_qasm=nam_opt0_qasm,
+                output_qasm=nam_opt3_qasm,
+                basis="nam",
+                timeout=opt3_timeout,
+            )
+
     if ibm_opt3 is not None:
         export_openqasm2_quartz_input(ibm_opt3, ibm_opt3_qasm, basis_gates=IBM_BASIS)
     if nam_opt3 is not None:
@@ -410,11 +542,19 @@ def build_inputs(args: argparse.Namespace, work_dir: Path) -> dict[str, Any]:
     nam_opt0_stats = cached_opt0_stats["nam"] or count_qasm_file(nam_opt0_qasm, gate_set="nam")
     if "rz_angle_breakdown" not in nam_opt0_stats:
         nam_opt0_stats["rz_angle_breakdown"] = rz_angle_breakdown(nam_opt0_qasm)
-    if nam_opt3 is None:
+    if qiskit_opt3_results["nam"] is not None:
+        nam_opt3_stats = qiskit_opt3_results["nam"].get("stats")
+    elif nam_opt3 is None:
         nam_opt3_stats = None
     else:
         nam_opt3_stats = count_qasm_file(nam_opt3_qasm, gate_set="nam")
         nam_opt3_stats["rz_angle_breakdown"] = rz_angle_breakdown(nam_opt3_qasm)
+    if qiskit_opt3_results["ibm"] is not None:
+        ibm_opt3_stats = qiskit_opt3_results["ibm"].get("stats")
+    elif ibm_opt3 is None:
+        ibm_opt3_stats = None
+    else:
+        ibm_opt3_stats = count_qasm_file(ibm_opt3_qasm, gate_set="ibm")
 
     return {
         "benchmark": bench_name,
@@ -433,11 +573,10 @@ def build_inputs(args: argparse.Namespace, work_dir: Path) -> dict[str, Any]:
         "logical_circuit_stats": logical_stats,
         "ibm_opt0_stats": cached_opt0_stats["ibm"]
         or count_qasm_file(ibm_opt0_qasm, gate_set="ibm"),
-        "ibm_opt3_stats": None
-        if ibm_opt3 is None
-        else count_qasm_file(ibm_opt3_qasm, gate_set="ibm"),
+        "ibm_opt3_stats": ibm_opt3_stats,
         "nam_opt0_stats": nam_opt0_stats,
         "nam_opt3_stats": nam_opt3_stats,
+        "qiskit_opt3_results": qiskit_opt3_results,
     }
 
 
@@ -905,6 +1044,17 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
     for basis in ("ibm", "nam"):
         opt0_stats = inputs[f"{basis}_opt0_stats"]
         opt3_stats = inputs[f"{basis}_opt3_stats"]
+        opt3_result = (inputs.get("qiskit_opt3_results") or {}).get(basis)
+        opt3_status = (
+            opt3_result.get("status")
+            if isinstance(opt3_result, dict)
+            else ("skipped" if opt3_stats is None else "ok")
+        )
+        opt3_elapsed = (
+            opt3_result.get("elapsed_seconds")
+            if isinstance(opt3_result, dict)
+            else None
+        )
         before = gate_count_total(opt0_stats)
         after = gate_count_total(opt3_stats)
         native_rows.append(
@@ -912,10 +1062,10 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
                 "benchmark": bench_name,
                 "method": f"qiskit_opt3_{basis}",
                 "basis": basis,
-                "status": "skipped" if opt3_stats is None else "ok",
+                "status": opt3_status,
                 "gate_counts": basis_gate_counts(opt3_stats, basis),
                 "comparison_vs_opt0": reduction_summary(before, after),
-                "elapsed_seconds": None,
+                "elapsed_seconds": opt3_elapsed,
             }
         )
 
@@ -1023,6 +1173,18 @@ def build_parser() -> argparse.ArgumentParser:
         "--skip-qiskit-opt3",
         action="store_true",
         help="Skip Qiskit opt3 baseline generation for large external lowered inputs.",
+    )
+    parser.add_argument(
+        "--qiskit-opt3-basis",
+        choices=["both", "ibm", "nam", "final"],
+        default="both",
+        help="Restrict qiskit-opt3 generation for external lowered inputs.",
+    )
+    parser.add_argument(
+        "--qiskit-opt3-timeout",
+        type=float,
+        default=0.0,
+        help="Optional qiskit-opt3 timeout in seconds for external lowered inputs; <=0 disables it.",
     )
     parser.add_argument(
         "--skip-final-recount",

@@ -1,0 +1,30 @@
+{
+  "mode": "diagnose",
+  "output": "validation/new_cases/HRW-scrambled4-s0",
+  "family": "hrw_scrambled",
+  "n": 4,
+  "dt": 0.01,
+  "input_seed": 0,
+  "wall": 300.0,
+  "cpu": 180.0,
+  "lowerings": 3,
+  "per_call": 90.0,
+  "candidates": 3,
+  "rounds": 4,
+  "rewrite_beam": 2,
+  "placement_beam": null,
+  "repeats": 1,
+  "profile": "default",
+  "profiles": [
+    "fast"
+  ],
+  "methods": [
+    "current_layered",
+    "proxy_layered",
+    "alternating",
+    "nested",
+    "frontier"
+  ],
+  "no_feedback": false,
+  "no_adaptive": false
+}

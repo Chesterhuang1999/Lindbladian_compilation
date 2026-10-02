@@ -1,0 +1,36 @@
+{
+  "status": "completed",
+  "repr_id": "r_c2ad503ebc8ce7069f987cee",
+  "upstream_score": 1597965.675623724,
+  "termination": {
+    "stop_reason": "frontier_exhausted",
+    "iterations": 2,
+    "max_steps": 4,
+    "cost_trajectory": [
+      1697447.7805201295,
+      1597965.675623724
+    ],
+    "support_trajectory": [
+      18,
+      17
+    ],
+    "beam_width": 2,
+    "keep_neutral": false,
+    "max_neutral_candidates": 3,
+    "skip_disjoint_pairs": true,
+    "frontier_sizes": [
+      2
+    ],
+    "generated_counts": [
+      4,
+      0
+    ],
+    "accepted_counts": [
+      2,
+      0
+    ],
+    "visited_states": 3,
+    "score_model_id": "paper_H_length_with_lambda_v1"
+  },
+  "trace_ref": null
+}

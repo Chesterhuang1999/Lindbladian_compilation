@@ -22,6 +22,7 @@ for path in (SCRIPT_DIR, SRC_DIR):
 from baseline_common import (  # noqa: E402
     compare_gate_stats,
     count_qasm_file,
+    load_qasm_stats_or_count,
     require_input_qasm,
     write_summary,
 )
@@ -209,7 +210,10 @@ def prepare_quartz_input(input_path: Path, output_path: Path, basis_gates: tuple
 def run(args: argparse.Namespace) -> dict[str, Any]:
     quartz = import_quartz()
     input_path = require_input_qasm(Path(args.input))
-    input_stats = count_qasm_file(input_path)
+    input_stats = load_qasm_stats_or_count(
+        input_path,
+        stats_path=Path(args.input_stats).resolve() if args.input_stats else None,
+    )
     gate_set = str(input_stats["detected_gate_set"])
     config = GATESETS[gate_set]
 
@@ -332,6 +336,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--input", required=True, help="Input OpenQASM2 file.")
     parser.add_argument("--output", default=None, help="Optional path to keep optimized QASM.")
     parser.add_argument("--summary", default=None, help="Optional JSON summary path.")
+    parser.add_argument("--input-stats", default=None, help="Optional cached input stats JSON.")
     parser.add_argument("--ecc", default=None, help="Override Quartz ECC JSON.")
     parser.add_argument("--timeout", type=float, default=3600.0, help="Quartz search timeout in seconds.")
     parser.add_argument("--max-candidates", type=int, default=1000)

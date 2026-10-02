@@ -11,13 +11,25 @@ from copy import deepcopy
 from qiskit import QuantumCircuit, QuantumRegister, transpile, ClassicalRegister
 from qiskit.quantum_info import Statevector, Operator, DensityMatrix, partial_trace
 from qiskit.circuit.library import UnitaryGate, TGate, RZGate, HGate, C3XGate, StatePreparation
-from qiskit_aer import noise, AerSimulator
-from qiskit_aer.library import save_statevector, set_statevector
+try:
+    from qiskit_aer import noise, AerSimulator
+    from qiskit_aer.library import save_statevector, set_statevector
+except ImportError:
+    noise = None
+    AerSimulator = None
+    save_statevector = None
+    set_statevector = None
 from subroutine import *
 from channel_IR import *
 from block_encoding import BlockEncoding
 from baseline import simulate_lindblad
 from qutip import tensor, Qobj, basis
+
+
+def _require_aer_simulator():
+    if AerSimulator is None:
+        raise ImportError("qiskit_aer.AerSimulator is required for simulation helpers.")
+    return AerSimulator
 
 ### Prepare a superposition state with given coeffs
 
@@ -218,6 +230,7 @@ def channel_to_LCU (ensem: channel_ensemble, structure = 'basic', opt = 'No') ->
 
     ## Channels are viewed as Kraus operators (matrixsums)
     coeff_sums = [ms.pauli_norm() for ms in channel]
+    subnorm = sum([ms**2 for ms in coeff_sums])
     
     sys = QuantumRegister(sys_size, 'sys')
     
@@ -248,7 +261,7 @@ def channel_to_LCU (ensem: channel_ensemble, structure = 'basic', opt = 'No') ->
         ctrl_indexes = list(range(2 * select_size, 2 * select_size + ctrl_size))
         sys_indexes = list(range(2 * select_size + ctrl_size, 2 * select_size + ctrl_size + sys_size))
         qc.compose(LCU_ini, qubits = select_indexes, inplace = True)
-        qc, tcount, mccount, cxcount = mulplex_U_opt(qc, block_circuits, select_size, ctrl_size , sys_size)
+        qc, tcount, mccount, cxcount = mulplex_U_tree(qc, block_circuits, select_size, ctrl_size , sys_size)
         qubit_indexes = [select_indexes, anc_indexes, ctrl_indexes, sys_indexes]
     return [qc, qubit_indexes]
 
@@ -489,7 +502,7 @@ def construct_qobj_lind(Lind: Lindbladian, dim_sys: int):
 
 
 def simulate_circuit(circuit: QuantumCircuit, ini_state: Statevector, qubit_regs: list):
-    simulator = AerSimulator()
+    simulator = _require_aer_simulator()()
     qc_test = deepcopy(circuit)
     
     ## Distinguish the type of registers using length of qubit_regs
@@ -506,7 +519,7 @@ def simulate_circuit(circuit: QuantumCircuit, ini_state: Statevector, qubit_regs
 
 
 def simulate_circuit_opt(circuit: QuantumCircuit, ini_state: Statevector, qubit_regs: list):
-    simulator = AerSimulator()
+    simulator = _require_aer_simulator()()
     qc_test = deepcopy(circuit)
     
     ## Distinguish the type of registers using length of qubit_regs

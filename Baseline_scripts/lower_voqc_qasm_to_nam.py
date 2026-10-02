@@ -7,6 +7,7 @@ import argparse
 import json
 import re
 from collections import Counter
+from math import gcd
 from pathlib import Path
 
 
@@ -28,6 +29,25 @@ PHASE_GATE_TO_RZ = {
 }
 
 
+def normalize_rzq_fraction(numerator: str, denominator: str) -> tuple[str, str]:
+    """Fold VOQC rzq(num, den) coefficients into a small exact pi multiple."""
+    num = int(numerator)
+    den = int(denominator)
+    if den == 0:
+        return numerator, denominator
+    if den < 0:
+        num = -num
+        den = -den
+
+    period = 2 * den
+    num = ((num + den) % period) - den
+    divisor = gcd(abs(num), den)
+    if divisor:
+        num //= divisor
+        den //= divisor
+    return str(num), str(den)
+
+
 def split_line_ending(line: str) -> tuple[str, str]:
     if line.endswith("\r\n"):
         return line[:-2], "\r\n"
@@ -43,6 +63,11 @@ def lower_voqc_code_line_to_nam(code: str, converted_ops: Counter[str]) -> str:
         indent = rzq_match.group("indent")
         numerator = rzq_match.group("num")
         denominator = rzq_match.group("den")
+        try:
+            numerator, denominator = normalize_rzq_fraction(numerator, denominator)
+            converted_ops["rzq_normalized"] += 1
+        except ValueError:
+            pass
         arg = rzq_match.group("arg")
         return f"{indent}rz(({numerator})*pi/({denominator})) {arg};"
 

@@ -1,0 +1,137 @@
+{
+  "version": 2,
+  "notes": [
+    "Historical IBM or older NAM counts are provenance only; rerun full NAM G/p.",
+    "hrw_scrambled is a new CP map, not asserted TP or equivalent to HRW; only within-instance row rewrites are equivalent.",
+    "Input seeds are distinct from placement/repetition seeds.",
+    "No downstream reversal is predeclared. Retain all screened candidates and failures."
+  ],
+  "cases": [
+    {
+      "id": "TFIM-2",
+      "family": "tfim",
+      "n": 2,
+      "role": "control"
+    },
+    {
+      "id": "TFIM-4",
+      "family": "tfim",
+      "n": 4,
+      "role": "control"
+    },
+    {
+      "id": "TFIM-8",
+      "family": "tfim",
+      "n": 8,
+      "role": "control"
+    },
+    {
+      "id": "HRW-2",
+      "family": "hrw",
+      "n": 2,
+      "role": "calibration"
+    },
+    {
+      "id": "HRW-4",
+      "family": "hrw",
+      "n": 4,
+      "role": "positive_candidate"
+    },
+    {
+      "id": "HRW-8",
+      "family": "hrw",
+      "n": 8,
+      "role": "positive_candidate"
+    },
+    {
+      "id": "HRW-20",
+      "family": "hrw",
+      "n": 20,
+      "role": "positive_candidate"
+    },
+    {
+      "id": "RP2-s0",
+      "family": "random_pauli",
+      "n": 2,
+      "seed": 0,
+      "role": "no_op_control"
+    },
+    {
+      "id": "RP2-s1",
+      "family": "random_pauli",
+      "n": 2,
+      "seed": 1,
+      "role": "no_op_control"
+    },
+    {
+      "id": "RP2-s2",
+      "family": "random_pauli",
+      "n": 2,
+      "seed": 2,
+      "role": "no_op_control"
+    },
+    {
+      "id": "RP2-s3",
+      "family": "random_pauli",
+      "n": 2,
+      "seed": 3,
+      "role": "no_op_control"
+    },
+    {
+      "id": "RP2-s4",
+      "family": "random_pauli",
+      "n": 2,
+      "seed": 4,
+      "role": "historical_rewrite_gain_retest"
+    },
+    {
+      "id": "HRW-scrambled4-s0",
+      "family": "hrw_scrambled",
+      "n": 4,
+      "seed": 0,
+      "role": "upper_gain_lower_uncertain"
+    },
+    {
+      "id": "HRW-scrambled4-s1",
+      "family": "hrw_scrambled",
+      "n": 4,
+      "seed": 1,
+      "role": "upper_gain_lower_uncertain"
+    },
+    {
+      "id": "HRW-scrambled4-s2",
+      "family": "hrw_scrambled",
+      "n": 4,
+      "seed": 2,
+      "role": "upper_gain_lower_uncertain"
+    },
+    {
+      "id": "HRW-scrambled4-s3",
+      "family": "hrw_scrambled",
+      "n": 4,
+      "seed": 3,
+      "role": "upper_gain_lower_uncertain"
+    },
+    {
+      "id": "HRW-scrambled4-s4",
+      "family": "hrw_scrambled",
+      "n": 4,
+      "seed": 4,
+      "role": "upper_gain_lower_uncertain"
+    },
+    {
+      "id": "HRW-scrambled4-s5",
+      "family": "hrw_scrambled",
+      "n": 4,
+      "seed": 5,
+      "role": "holdout"
+    },
+    {
+      "id": "HRW-scrambled4-s6",
+      "family": "hrw_scrambled",
+      "n": 4,
+      "seed": 6,
+      "role": "holdout"
+    }
+  ]
+}

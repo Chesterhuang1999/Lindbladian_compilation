@@ -30,6 +30,34 @@ class _SearchState:
     placement: tuple[tuple[int, int], ...]
 
 
+@dataclass(frozen=True)
+class AxisSpanAnalysis:
+    axis: str
+    term_indices: tuple[int, ...]
+    term_count: int
+    unique: bool
+    rank: int
+    generator_indices: tuple[int, ...]
+    generator_labels: tuple[str, ...]
+    shortcut_available: bool
+    rank_width: int | None
+    viable_width: int | None
+    fixed_cost: int | None
+
+
+@dataclass(frozen=True)
+class PlacementStructureAnalysis:
+    num_qubits: int
+    labels: tuple[str, ...]
+    term_count: int
+    identity_index: int | None
+    min_width: int
+    subgroup_rank: int | None
+    subgroup_viable_width: int | None
+    axis: dict[str, AxisSpanAnalysis]
+    suggested_widths: tuple[int, ...]
+
+
 def _default_control_size(term_count: int) -> int:
     if term_count <= 1:
         return 0
@@ -146,6 +174,40 @@ def _span_coordinate_map(basis_vectors: list[int]) -> dict[int, int]:
         }
         span.update(updates)
     return span
+
+
+def _basis_coordinates(
+    basis_vectors: list[int], query_vectors: Iterable[int]
+) -> dict[int, int]:
+    """Solve coordinates for requested vectors without enumerating the span."""
+    pivots: dict[int, tuple[int, int]] = {}
+    for basis_pos, basis_vector in enumerate(basis_vectors):
+        value = basis_vector
+        coordinate = 1 << basis_pos
+        while value:
+            pivot = value.bit_length() - 1
+            row = pivots.get(pivot)
+            if row is None:
+                pivots[pivot] = (value, coordinate)
+                break
+            value ^= row[0]
+            coordinate ^= row[1]
+        else:
+            raise ValueError("Coordinate basis must be linearly independent.")
+
+    coordinates = {}
+    for vector in query_vectors:
+        value = vector
+        coordinate = 0
+        while value:
+            row = pivots.get(value.bit_length() - 1)
+            if row is None:
+                break
+            value ^= row[0]
+            coordinate ^= row[1]
+        if value == 0:
+            coordinates[vector] = coordinate
+    return coordinates
 
 
 def _is_axis_vector(bits: int, num_qubits: int, axis: str) -> bool:
@@ -381,6 +443,153 @@ def _extract_pauli_labels(matrixsum: Matrixsum) -> list[str]:
             )
         labels.append(atom.expr)
     return labels
+
+
+def _analyze_axis_span(
+    axis: str,
+    searchable_indices: list[int],
+    vectors: list[int],
+    labels: list[str],
+    num_qubits: int,
+) -> AxisSpanAnalysis:
+    axis_indices = tuple(
+        term_idx
+        for term_idx in searchable_indices
+        if _is_axis_vector(vectors[term_idx], num_qubits, axis)
+    )
+    unique_vectors = {vectors[term_idx] for term_idx in axis_indices}
+    unique = len(unique_vectors) == len(axis_indices)
+    rank = _gf2_rank(unique_vectors)
+    generator_terms = tuple(
+        _low_weight_independent_terms(axis_indices, vectors, labels, num_qubits)
+    )
+    generator_labels = tuple(labels[term_idx] for term_idx in generator_terms)
+
+    fixed_cost = None
+    shortcut_available = False
+    rank_width = None
+    viable_width = None
+    if (
+        len(axis_indices) > 0
+        and unique
+        and rank > 0
+        and len(axis_indices) > rank
+        and len(generator_terms) == rank
+    ):
+        shortcut_available = True
+        rank_width = rank
+        has_out_of_axis_terms = any(
+            term_idx not in axis_indices for term_idx in searchable_indices
+        )
+        viable_width = rank + 1 if has_out_of_axis_terms else rank
+        basis_vectors = [vectors[term_idx] for term_idx in generator_terms]
+        span = _basis_coordinates(
+            basis_vectors, (vectors[term_idx] for term_idx in axis_indices)
+        )
+        placement = []
+        used_addresses = set()
+        for term_idx in axis_indices:
+            address = span.get(vectors[term_idx])
+            if address is None or address == 0 or address in used_addresses:
+                placement = []
+                break
+            used_addresses.add(address)
+            placement.append((term_idx, address))
+        if len(placement) == len(axis_indices):
+            fixed_cost = _placement_cost_from_index_modes(
+                placement, vectors, num_qubits
+            )
+        else:
+            shortcut_available = False
+            rank_width = None
+            viable_width = None
+
+    return AxisSpanAnalysis(
+        axis=axis,
+        term_indices=axis_indices,
+        term_count=len(axis_indices),
+        unique=unique,
+        rank=rank,
+        generator_indices=generator_terms,
+        generator_labels=generator_labels,
+        shortcut_available=shortcut_available,
+        rank_width=rank_width,
+        viable_width=viable_width,
+        fixed_cost=fixed_cost,
+    )
+
+
+def analyze_placement_structure(matrixsum: Matrixsum) -> PlacementStructureAnalysis:
+    """Return a cheap structural summary used before placement search."""
+    labels = _extract_pauli_labels(matrixsum)
+    num_qubits = matrixsum.size
+    min_width = _default_control_size(len(labels))
+    zero_label = "I" * num_qubits
+    identity_index = next(
+        (idx for idx, label in enumerate(labels) if label == zero_label),
+        None,
+    )
+    searchable_indices = [
+        idx for idx, label in enumerate(labels) if label != zero_label
+    ]
+    vectors = [_label_to_bits(label) for label in labels]
+    axis = {
+        axis_name: _analyze_axis_span(
+            axis_name,
+            searchable_indices,
+            vectors,
+            labels,
+            num_qubits,
+        )
+        for axis_name in ("z", "x")
+    }
+
+    subgroup_rank = None
+    subgroup_viable_width = None
+    vector_to_term: dict[int, int] = {}
+    subgroup_unique = True
+    for term_idx in searchable_indices:
+        vector = vectors[term_idx]
+        if vector == 0 or vector in vector_to_term:
+            subgroup_unique = False
+            break
+        vector_to_term[vector] = term_idx
+    if subgroup_unique and len(vector_to_term) > 0:
+        subgroup_rank = _gf2_rank(vector_to_term)
+        # A basis of these terms spans every term by construction. Only its
+        # cardinality is needed to decide whether padding is affordable.
+        span_size = (1 << subgroup_rank) - 1
+        padding_count = span_size - len(searchable_indices)
+        if padding_count <= len(searchable_indices):
+            subgroup_viable_width = subgroup_rank
+
+    suggested_widths = {min_width}
+    if subgroup_viable_width is not None and subgroup_viable_width >= min_width:
+        suggested_widths.add(subgroup_viable_width)
+    for axis_info in axis.values():
+        if (
+            axis_info.shortcut_available
+            and axis_info.viable_width is not None
+            and axis_info.viable_width >= min_width
+        ):
+            suggested_widths.add(axis_info.viable_width)
+
+    return PlacementStructureAnalysis(
+        num_qubits=num_qubits,
+        labels=tuple(labels),
+        term_count=len(labels),
+        identity_index=identity_index,
+        min_width=min_width,
+        subgroup_rank=subgroup_rank,
+        subgroup_viable_width=subgroup_viable_width,
+        axis=axis,
+        suggested_widths=tuple(sorted(suggested_widths)),
+    )
+
+
+def candidate_control_widths(matrixsum: Matrixsum) -> tuple[int, ...]:
+    """Return address-width candidates derived only from Pauli structure."""
+    return analyze_placement_structure(matrixsum).suggested_widths
 
 
 def _generate_padding_labels(

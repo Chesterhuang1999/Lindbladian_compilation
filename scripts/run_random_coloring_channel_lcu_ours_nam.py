@@ -412,8 +412,14 @@ def build_random_coloring_channel(
     tol: float,
     max_total_pauli_terms: int | None,
     max_terms_per_kraus: int | None,
-    mix_colors: bool,
+    color_mixing_preprocess: bool,
 ) -> tuple[list[Matrixsum], dict[str, Any]]:
+    """Build the natural un-mixed (vertex, proposed-color) Kraus rows.
+
+    The builder never applies direct color-space mixing.  The optional
+    ``color_mixing_preprocess`` flag only records whether the later rewrite
+    stage is allowed to run the legacy Walsh-Hadamard structure preprocess.
+    """
     q = n if q is None else q
     spec = CaseSpec(n=n, q=q, graph=graph)
     edges = graph_edges(graph, n)
@@ -457,25 +463,17 @@ def build_random_coloring_channel(
                     f"--max-total-pauli-terms={max_total_pauli_terms}."
                 )
 
-    if mix_colors:
-        kraus_ops = color_hadamard_mix_kraus(kraus_ops, spec, tol)
-        if max_terms_per_kraus is not None:
-            for index, kraus in enumerate(kraus_ops):
-                if len(kraus.instances) > max_terms_per_kraus:
-                    raise RuntimeError(
-                        f"{spec.name} mixed Kraus(index={index}) has {len(kraus.instances)} "
-                        f"terms, exceeding --max-terms-per-kraus={max_terms_per_kraus}."
-                    )
-        total_terms = sum(len(op.instances) for op in kraus_ops)
-        if max_total_pauli_terms is not None and total_terms > max_total_pauli_terms:
-            raise RuntimeError(
-                f"{spec.name} mixed channel has {total_terms} Pauli terms, exceeding "
-                f"--max-total-pauli-terms={max_total_pauli_terms}."
-            )
-        model_info["kraus_color_mixing"] = "walsh_hadamard_by_vertex"
-        model_info["pauli_terms_after_color_mixing"] = int(total_terms)
+    model_info["kraus_color_mixing"] = "none"
+    model_info["generation_color_mixing"] = "none"
+    if color_mixing_preprocess:
+        model_info["rewrite_stage_color_mixing"] = "walsh_hadamard_by_vertex"
+        model_info["rewrite_stage_color_mixing_note"] = (
+            "Legacy opt-in preprocess: color Walsh-Hadamard Kraus mixing is "
+            "deferred to the rewrite stage so generation keeps the natural "
+            "(vertex,color) Kraus structure."
+        )
     else:
-        model_info["kraus_color_mixing"] = "none"
+        model_info["rewrite_stage_color_mixing"] = "disabled_direct_gatecost_search"
 
     return kraus_ops, model_info
 
@@ -490,24 +488,79 @@ def channel_metrics(kraus_ops: list[Matrixsum]) -> dict[str, int]:
     }
 
 
+def apply_color_hadamard_rewrite_structure(
+    kraus_ops: list[Matrixsum],
+    spec: CaseSpec,
+    *,
+    tol: float,
+) -> tuple[list[Matrixsum], dict[str, Any]]:
+    """Recognize and apply per-vertex color Walsh-Hadamard mixing for rewrite."""
+    before = channel_metrics(kraus_ops)
+    if spec.q <= 1 or spec.q & (spec.q - 1):
+        raise ValueError("Random-coloring rewrite color mixing requires q to be a power of two.")
+    if len(kraus_ops) != spec.n * spec.q:
+        raise ValueError(
+            f"Expected {spec.n * spec.q} random-coloring Kraus rows for "
+            f"{spec.name}, got {len(kraus_ops)}."
+        )
+    mixed = color_hadamard_mix_kraus(copy.deepcopy(kraus_ops), spec, tol)
+    after = channel_metrics(mixed)
+    metadata = {
+        "method": "walsh_hadamard_by_vertex",
+        "stage": "rewrite_preprocess",
+        "recognized_structure": "random_coloring_vertex_color_groups",
+        "group_count": int(spec.n),
+        "group_size": int(spec.q),
+        "input_channel_metrics": before,
+        "output_channel_metrics": after,
+    }
+    return mixed, metadata
+
+
 def rewrite_channel(
     kraus_ops: list[Matrixsum],
     *,
+    objective: str,
     strategy: str,
     beam_width: int,
     max_steps: int,
     tol: float,
+    color_mixing_spec: CaseSpec | None = None,
 ) -> tuple[list[Matrixsum], dict[str, Any], float]:
     started = time.perf_counter()
-    rewrite_source = ChannelIR(copy.deepcopy(kraus_ops))
+    rewrite_input = copy.deepcopy(kraus_ops)
+    preprocess = None
+    if color_mixing_spec is not None:
+        rewrite_input, preprocess = apply_color_hadamard_rewrite_structure(
+            rewrite_input,
+            color_mixing_spec,
+            tol=tol,
+        )
+
+    rewrite_source = ChannelIR(copy.deepcopy(rewrite_input))
     rewrite_source.zero_elim()
-    result = rewrite_source.rewrite_search(
-        strategy=strategy,
-        beam_width=beam_width,
-        max_steps=max_steps,
-        tol=tol,
+    if objective == "support":
+        result = rewrite_source.rewrite_search(
+            strategy=strategy,
+            beam_width=beam_width,
+            max_steps=max_steps,
+            tol=tol,
+        )
+    elif objective == "gatecost":
+        result = rewrite_source.gatecost_rewrite_search(
+            strategy=strategy,
+            beam_width=beam_width,
+            max_steps=max_steps,
+            tol=tol,
+        )
+    else:
+        raise ValueError(f"Unsupported rewrite objective: {objective}")
+    result["method"] = (
+        "gatecost_rewrite_search" if objective == "gatecost" else "rewrite_search"
     )
-    rewritten = ChannelIR(copy.deepcopy(kraus_ops))
+    if preprocess is not None:
+        result["preprocess"] = preprocess
+    rewritten = ChannelIR(copy.deepcopy(rewrite_input))
     rewritten.apply_rewrite_result(result, tol=tol)
     rewritten.zero_elim()
     elapsed = time.perf_counter() - started
@@ -564,6 +617,38 @@ def build_single_kraus_matrix_order_circuit(kraus_ops: list[Matrixsum]) -> tuple
     return qc, [[], [], list(range(ctrl_size)), list(range(ctrl_size, ctrl_size + sys_size))], elapsed
 
 
+def compact_matrix_order_block_metadata(
+    kraus_index: int,
+    matrixsum: Matrixsum,
+    block_encoding: Any,
+    circuit: QuantumCircuit,
+) -> dict[str, Any]:
+    placement_debug = getattr(block_encoding, "placement_search_debug", {}) or {}
+    return {
+        "kraus_index": int(kraus_index),
+        "pauli_terms": int(len(matrixsum.instances)),
+        "system_qubits": int(matrixsum.size),
+        "block_qubits": int(circuit.num_qubits),
+        "selected_k": int(getattr(block_encoding, "selected_k", -1)),
+        "selected_crit": str(getattr(block_encoding, "selected_crit", "")),
+        "candidate_costs": getattr(block_encoding, "candidate_costs", []),
+        "width_candidate_costs": getattr(block_encoding, "width_candidate_costs", []),
+        "placement": {
+            "initial_strategy": placement_debug.get("initial_strategy"),
+            "shortcut": placement_debug.get("shortcut"),
+            "shortcut_axis": placement_debug.get("shortcut_axis"),
+            "shortcut_rank": placement_debug.get("shortcut_rank"),
+            "pre_refinement_cost": placement_debug.get("pre_refinement_cost"),
+            "best_cost": placement_debug.get("best_cost"),
+            "padded_search_cost": placement_debug.get("padded_search_cost"),
+            "padding_count": placement_debug.get("padding_count"),
+            "search_profile": placement_debug.get("search_profile"),
+            "candidate_width": placement_debug.get("candidate_width"),
+            "candidate_widths": placement_debug.get("candidate_widths"),
+        },
+    }
+
+
 def build_rewrite_opt_matrix_order_circuit(
     kraus_ops: list[Matrixsum],
 ) -> tuple[QuantumCircuit, Any, float]:
@@ -576,10 +661,15 @@ def build_rewrite_opt_matrix_order_circuit(
     coeff_sums = [ms.pauli_norm() for ms in kraus_ops]
 
     lcu_ini = channel_LCU.prep_sup_state(coeff_sums)
-    circuits = [
-        NewBlockEncoding(copy.deepcopy(ms)).circuit(opt="Matrix-order")
-        for ms in kraus_ops
-    ]
+    circuits = []
+    matrix_order_blocks = []
+    for index, ms in enumerate(kraus_ops):
+        block_encoding = NewBlockEncoding(copy.deepcopy(ms))
+        circuit = block_encoding.circuit(opt="Matrix-order")
+        circuits.append(circuit)
+        matrix_order_blocks.append(
+            compact_matrix_order_block_metadata(index, ms, block_encoding, circuit)
+        )
     ctrl_size = max(circ.num_qubits - sys_size for circ in circuits)
 
     qc = QuantumCircuit(2 * select_size + ctrl_size + sys_size)
@@ -596,6 +686,12 @@ def build_rewrite_opt_matrix_order_circuit(
         ctrl_size,
         sys_size,
     )
+    qc.metadata = {
+        "matrix_order_blocks": matrix_order_blocks,
+        "select_size": int(select_size),
+        "ctrl_size": int(ctrl_size),
+        "system_qubits": int(sys_size),
+    }
     elapsed = time.perf_counter() - started
     return qc, [select_indexes, anc_indexes, ctrl_indexes, sys_indexes], elapsed
 
@@ -788,7 +884,18 @@ def run_case(args: argparse.Namespace, case: CaseSpec) -> dict[str, Any]:
     max_degree = max((len(nbrs) for nbrs in neighbors), default=0)
     model_info = random_coloring_model_info(case, edges, max_degree)
     if args.metadata_only:
-        model_info["kraus_color_mixing"] = "none" if args.no_color_mixing else "walsh_hadamard_by_vertex"
+        model_info["kraus_color_mixing"] = "none"
+        model_info["generation_color_mixing"] = "none"
+        model_info["rewrite_stage_color_mixing"] = (
+            "walsh_hadamard_by_vertex"
+            if args.color_mixing_preprocess
+            else "disabled_direct_gatecost_search"
+        )
+        model_info["rewrite_method"] = (
+            "gatecost_rewrite_search"
+            if args.rewrite_objective == "gatecost"
+            else "rewrite_search"
+        )
         summary = {
             "experiment": "random_coloring_channel_lcu_ours_dual_basis",
             "case": case.name,
@@ -815,13 +922,146 @@ def run_case(args: argparse.Namespace, case: CaseSpec) -> dict[str, Any]:
             tol=args.tol,
             max_total_pauli_terms=args.max_total_pauli_terms,
             max_terms_per_kraus=args.max_terms_per_kraus,
-            mix_colors=not args.no_color_mixing,
+            color_mixing_preprocess=args.color_mixing_preprocess,
         )
     except Exception as exc:
         return unavailable_summary(case, out_dir, started_case, exc, model_info=model_info)
 
     out_dir.mkdir(parents=True, exist_ok=True)
     raw_channel_metrics = channel_metrics(raw_kraus_ops)
+
+    if args.ours_only:
+        rewritten_kraus_ops, rewrite_result, rewrite_time = rewrite_channel(
+            raw_kraus_ops,
+            objective=args.rewrite_objective,
+            strategy=args.rewrite_strategy,
+            beam_width=args.beam_width,
+            max_steps=args.max_steps,
+            tol=args.tol,
+            color_mixing_spec=case if args.color_mixing_preprocess else None,
+        )
+        rewrite_channel_metrics = channel_metrics(rewritten_kraus_ops)
+
+        try:
+            ours_qc, ours_qubit_indexes, ours_build_time = run_with_timeout(
+                _ours_circuit_worker,
+                (rewritten_kraus_ops,),
+                args.synthesis_timeout_sec,
+                f"{case.name} ours-only optimized channel-LCU synthesis",
+            )
+        except SynthesisTimeout as exc:
+            return unavailable_summary(
+                case,
+                out_dir,
+                started_case,
+                exc,
+                model_info=model_info,
+                status="timeout",
+                extra={
+                    "failed_stage": "ours_only_optimized_channel_lcu_synthesis",
+                    "raw": {
+                        "channel_metrics": raw_channel_metrics,
+                        "circuit_synthesis": "skipped_by_ours_only",
+                    },
+                    "rewrite": {
+                        "channel_metrics": rewrite_channel_metrics,
+                        "time_s": float(rewrite_time),
+                        "initial_support": int(rewrite_result["initial_support"]),
+                        "final_support": int(rewrite_result["final_support"]),
+                        "initial_cost": rewrite_result.get("initial_cost"),
+                        "final_cost": rewrite_result.get("final_cost"),
+                        "method": rewrite_result.get("method"),
+                        "cost_model": rewrite_result.get("cost_model"),
+                        "steps": int(len(rewrite_result["steps"])),
+                        "preprocess": rewrite_result.get("preprocess"),
+                        "termination": rewrite_result.get("termination", {}),
+                    },
+                    "synthesis_timeout_sec": args.synthesis_timeout_sec,
+                },
+            )
+
+        ours_qasm = out_dir / f"{case.name}_ours_only_rewrite_opt_matrix_order.qasm"
+        dump_untranspiled_qasm(ours_qc, ours_qasm)
+        ours_stats: dict[str, Any] = {}
+        ours_times: dict[str, float] = {}
+        rows: list[dict[str, Any]] = []
+        for gate_set in ("nam", "ibm"):
+            path = out_dir / f"{case.name}_ours_only_rewrite_opt_matrix_order_{gate_set}.qasm"
+            stats, elapsed = export_basis_count_qasm(
+                ours_qc,
+                path,
+                gate_set=gate_set,
+                optimization_level=args.transpile_optimization_level,
+            )
+            ours_stats[gate_set] = {"qasm": str(path), "stats": stats}
+            ours_times[gate_set] = elapsed
+            rows.append(
+                row_from_stats(
+                    "Ours-only (rewrite + opt + matrix-order)",
+                    gate_set,
+                    stats,
+                    rewrite_time + ours_build_time + elapsed,
+                    reference_total=None,
+                )
+            )
+
+        summary = {
+            "experiment": "random_coloring_channel_lcu_ours_dual_basis",
+            "case": case.name,
+            "status": "ours_ok",
+            "model": model_info,
+            "basis_counted": {
+                "nam": list(NAM_BASIS),
+                "ibm": list(IBM_BASIS),
+            },
+            "transpiler_basis": {
+                "nam": list(NAM_TRANSPILER_BASIS),
+                "ibm": list(IBM_TRANSPILER_BASIS),
+            },
+            "transpile_optimization_level": int(args.transpile_optimization_level),
+            "raw": {
+                "channel_metrics": raw_channel_metrics,
+                "circuit_synthesis": "skipped_by_ours_only",
+            },
+            "rewrite": {
+                "channel_metrics": rewrite_channel_metrics,
+                "time_s": float(rewrite_time),
+                "initial_support": int(rewrite_result["initial_support"]),
+                "final_support": int(rewrite_result["final_support"]),
+                "initial_cost": rewrite_result.get("initial_cost"),
+                "final_cost": rewrite_result.get("final_cost"),
+                "method": rewrite_result.get("method"),
+                "cost_model": rewrite_result.get("cost_model"),
+                "initial_cost_components": rewrite_result.get("initial_cost_components"),
+                "final_cost_components": rewrite_result.get("final_cost_components"),
+                "steps": int(len(rewrite_result["steps"])),
+                "preprocess": rewrite_result.get("preprocess"),
+                "termination": rewrite_result.get("termination", {}),
+            },
+            "ours": {
+                "structure": "opt",
+                "opt": "Matrix-order",
+                "build_time_s": float(ours_build_time),
+                "qasm": str(ours_qasm),
+                "basis_outputs": ours_stats,
+                "basis_transpile_times_s": ours_times,
+                "qubit_indexes": ours_qubit_indexes,
+                "matrix_order_metadata": getattr(ours_qc, "metadata", {}) or {},
+            },
+            "comparison": {
+                "raw_metric_total": None,
+                "ours_to_raw_ratio": None,
+                "note": "Raw channel-LCU circuit synthesis was intentionally skipped by --ours-only.",
+            },
+            "table_rows": rows,
+            "markdown_table": markdown_table(rows),
+            "note": "--ours-only requested; raw channel-LCU circuit synthesis was skipped.",
+            "total_time_s": float(time.perf_counter() - started_case),
+        }
+        summary_path = out_dir / f"{case.name}_ours_dual_basis_summary.json"
+        summary_path.write_text(json.dumps(summary, indent=2, default=str), encoding="utf-8")
+        summary["summary_path"] = str(summary_path)
+        return summary
 
     try:
         raw_qc, raw_qubit_indexes, raw_build_time = run_with_timeout(
@@ -899,10 +1139,12 @@ def run_case(args: argparse.Namespace, case: CaseSpec) -> dict[str, Any]:
 
     rewritten_kraus_ops, rewrite_result, rewrite_time = rewrite_channel(
         raw_kraus_ops,
+        objective=args.rewrite_objective,
         strategy=args.rewrite_strategy,
         beam_width=args.beam_width,
         max_steps=args.max_steps,
         tol=args.tol,
+        color_mixing_spec=case if args.color_mixing_preprocess else None,
     )
     rewrite_channel_metrics = channel_metrics(rewritten_kraus_ops)
 
@@ -935,7 +1177,12 @@ def run_case(args: argparse.Namespace, case: CaseSpec) -> dict[str, Any]:
                     "time_s": float(rewrite_time),
                     "initial_support": int(rewrite_result["initial_support"]),
                     "final_support": int(rewrite_result["final_support"]),
+                    "initial_cost": rewrite_result.get("initial_cost"),
+                    "final_cost": rewrite_result.get("final_cost"),
+                    "method": rewrite_result.get("method"),
+                    "cost_model": rewrite_result.get("cost_model"),
                     "steps": int(len(rewrite_result["steps"])),
+                    "preprocess": rewrite_result.get("preprocess"),
                     "termination": rewrite_result.get("termination", {}),
                 },
                 "synthesis_timeout_sec": args.synthesis_timeout_sec,
@@ -999,7 +1246,14 @@ def run_case(args: argparse.Namespace, case: CaseSpec) -> dict[str, Any]:
             "time_s": float(rewrite_time),
             "initial_support": int(rewrite_result["initial_support"]),
             "final_support": int(rewrite_result["final_support"]),
+            "initial_cost": rewrite_result.get("initial_cost"),
+            "final_cost": rewrite_result.get("final_cost"),
+            "method": rewrite_result.get("method"),
+            "cost_model": rewrite_result.get("cost_model"),
+            "initial_cost_components": rewrite_result.get("initial_cost_components"),
+            "final_cost_components": rewrite_result.get("final_cost_components"),
             "steps": int(len(rewrite_result["steps"])),
+            "preprocess": rewrite_result.get("preprocess"),
             "termination": rewrite_result.get("termination", {}),
         },
         "ours": {
@@ -1010,6 +1264,7 @@ def run_case(args: argparse.Namespace, case: CaseSpec) -> dict[str, Any]:
             "basis_outputs": ours_stats,
             "basis_transpile_times_s": ours_times,
             "qubit_indexes": ours_qubit_indexes,
+            "matrix_order_metadata": getattr(ours_qc, "metadata", {}) or {},
         },
         "comparison": comparisons,
         "table_rows": rows,
@@ -1040,8 +1295,14 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--q", type=int, default=None, help="Number of colors. Default: q=n for each case.")
     parser.add_argument("--graph", nargs="+", choices=("linear", "path", "cycle", "complete", "all"), default=["all"])
     parser.add_argument("--out-root", type=Path, default=DEFAULT_OUT_ROOT)
-    parser.add_argument("--rewrite-strategy", choices=("greedy", "beam"), default="greedy")
-    parser.add_argument("--beam-width", type=int, default=3)
+    parser.add_argument(
+        "--rewrite-objective",
+        choices=("gatecost", "support"),
+        default="gatecost",
+        help="Rewrite objective. Default: gatecost, matching the direct HRW-style search path.",
+    )
+    parser.add_argument("--rewrite-strategy", choices=("greedy", "beam"), default="beam")
+    parser.add_argument("--beam-width", type=int, default=8)
     parser.add_argument("--max-steps", type=int, default=50)
     parser.add_argument("--tol", type=float, default=1e-12)
     parser.add_argument("--transpile-optimization-level", type=int, default=0)
@@ -1056,9 +1317,19 @@ def parse_args() -> argparse.Namespace:
         help="Stop after raw channel-LCU synthesis and basis export.",
     )
     parser.add_argument(
+        "--ours-only",
+        action="store_true",
+        help="Skip raw channel-LCU synthesis and directly build the rewrite+opt+Matrix-order circuit.",
+    )
+    parser.add_argument(
+        "--color-mixing-preprocess",
+        action="store_true",
+        help="Opt in to the legacy rewrite-stage per-vertex Walsh-Hadamard Kraus preprocess.",
+    )
+    parser.add_argument(
         "--no-color-mixing",
         action="store_true",
-        help="Disable per-vertex Walsh-Hadamard Kraus mixing over proposed colors.",
+        help=argparse.SUPPRESS,
     )
     parser.add_argument(
         "--synthesis-timeout-sec",
@@ -1078,7 +1349,12 @@ def parse_args() -> argparse.Namespace:
         default=50_000,
         help="Protective cap; cases exceeding it are recorded as unavailable.",
     )
-    return parser.parse_args()
+    args = parser.parse_args()
+    if args.raw_only and args.ours_only:
+        parser.error("--raw-only and --ours-only are mutually exclusive.")
+    if args.no_color_mixing:
+        args.color_mixing_preprocess = False
+    return args
 
 
 def main() -> None:
@@ -1093,7 +1369,7 @@ def main() -> None:
             summary = run_case(args, case)
             summaries.append(summary)
             print(f"## {case.name} [{summary['status']}]")
-            if summary["status"] == "ok":
+            if summary["status"] in {"ok", "ours_ok"}:
                 print(summary["markdown_table"])
                 print(
                     "rewrite support: "
@@ -1107,6 +1383,8 @@ def main() -> None:
                     f"{summary['raw']['channel_metrics']['pauli_terms_total']} -> "
                     f"{summary['rewrite']['channel_metrics']['pauli_terms_total']}"
                 )
+                if summary["status"] == "ours_ok":
+                    print("raw circuit synthesis: skipped by --ours-only")
             elif summary["status"] == "metadata_only":
                 print(
                     "metadata only: "
@@ -1114,8 +1392,15 @@ def main() -> None:
                     f"proper_colorings={summary['model']['proper_coloring_count']}, "
                     f"estimated_terms={summary['model']['estimated_pauli_terms_total']}"
                 )
+            elif summary["status"] == "raw_ok":
+                print(summary["markdown_table"])
+                print(
+                    "raw-only: "
+                    f"proper_colorings={summary['model']['proper_coloring_count']}, "
+                    f"terms={summary['raw']['channel_metrics']['pauli_terms_total']}"
+                )
             else:
-                print(summary["error_msg"])
+                print(summary.get("error_msg", f"status={summary['status']}"))
             print(f"summary: {summary['summary_path']}")
             print()
 

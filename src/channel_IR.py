@@ -218,8 +218,8 @@ class Matrixsum:
                     new_instances.append((PauliAtom(key, phase = total_coeff / abs(total_coeff)), abs(total_coeff)))
                 else:
                     new_instances.append((MatrixAtom(key, phase = total_coeff / abs(total_coeff)), abs(total_coeff)))
-
-        return Matrixsum(new_instances).eliminate_global_phase()
+        # return Matrixsum(new_instances).eliminate_global_phase()
+        return Matrixsum(new_instances)
     def is_proportional(self, other, tol=1e-10):
         """
         Check if self = c * other for some complex number c.
@@ -444,6 +444,7 @@ class channel:
             else:
                 raise ValueError("Kraus operators must be in Matrixsum form")
 
+        self.glob_phase_elim()
 
     ### Channel-IR rewrite rules  
      
@@ -461,6 +462,12 @@ class channel:
         self.kraus_ops = [op.eliminate_global_phase() for op in self.kraus_ops]
         return self
 
+    def subnormalization(self):
+        subnorm = 0.0
+        for op in self.kraus_ops:
+            subnorm += op.pauli_norm()**2
+        return subnorm
+    
     def merging(self, tol=1e-10):
         """Merge Kraus operators that are proportional to each other, i.e. K1 = c * K2. """
         # First eliminate zero operators
@@ -929,6 +936,8 @@ class channel:
 
         Args:
             strategy: 'greedy' — always pick the best single-step improvement.
+                      'greedy_incremental' — same choices with two-row scoring
+                                             and cached pair candidates.
                       'beam'   — keep top beam_width states and explore all pair unitaries.
             beam_width: Number of states to keep at each step (only for 'beam').
             max_steps: Maximum number of rewrite steps.
@@ -951,6 +960,10 @@ class channel:
 
         if strategy == 'greedy':
             return self._greedy_search(A, labels, m, initial_support, max_steps, tol, verbose)
+        elif strategy == 'greedy_incremental':
+            return self._greedy_search_incremental(
+                A, labels, m, initial_support, max_steps, tol, verbose,
+            )
         elif strategy == 'beam':
             return self._beam_search(
                 A,
@@ -1047,6 +1060,102 @@ class channel:
             current_support += best_delta
             support_trajectory.append(current_support)
 
+            steps.append((best_pair, best_U, current_support))
+            if verbose:
+                print(f"  Step {step}: apply U on pair {best_pair}, "
+                      f"delta={best_delta}, support={current_support}")
+
+        return {
+            'initial_support': initial_support,
+            'final_support': current_support,
+            'steps': steps,
+            'A_final': current_A,
+            'labels': labels,
+            'termination': {
+                'stop_reason': stop_reason,
+                'iterations': len(steps),
+                'max_steps': max_steps,
+                'support_trajectory': support_trajectory,
+            },
+        }
+
+    def _greedy_search_incremental(self, A, labels, m, initial_support, max_steps, tol, verbose):
+        """Greedy with two-row updates and invalidation of touched pair scores.
+
+        Candidate generation and strict-improvement tie rules match _greedy_search.
+        The original strategy remains the default for historical timing comparisons.
+        """
+        steps = []
+        current_A = A.copy()
+        current_support = initial_support
+        support_trajectory = [initial_support]
+        stop_reason = "max_steps_reached"
+        row_supports = self._row_supports(current_A, tol)
+        pair_deltas = np.zeros((m, m), dtype=np.intp) if max_steps > 0 else None
+        pair_unitaries = {}
+        dirty_pairs = combinations(range(m), 2)
+
+        # The public entry point already thresholds A. Preserve the old behavior
+        # for direct calls with tiny entries by cleaning all rows on first acceptance.
+        needs_initial_cleanup = bool(np.any(
+            (np.abs(current_A) < tol) & (current_A != 0)
+        ))
+
+        def rotated_rows(i, j, U):
+            ri, rj = current_A[i], current_A[j]
+            new_i, new_j = np.empty_like(ri), np.empty_like(rj)
+            new_i[:] = U[0, 0] * ri + U[0, 1] * rj
+            new_j[:] = U[1, 0] * ri + U[1, 1] * rj
+            new_i[np.abs(new_i) < tol] = 0.0
+            new_j[np.abs(new_j) < tol] = 0.0
+            return new_i, new_j
+
+        for step in range(max_steps):
+            for i, j in dirty_pairs:
+                old_pair_support = int(row_supports[i] + row_supports[j])
+                best_delta, best_U = 0, None
+                for U in self._candidate_unitaries_for_pair(current_A, i, j, tol):
+                    new_i, new_j = rotated_rows(i, j, U)
+                    new_pair_support = int(np.sum(np.abs(new_i) > tol))
+                    new_pair_support += int(np.sum(np.abs(new_j) > tol))
+                    delta = new_pair_support - old_pair_support
+                    if delta < best_delta:
+                        best_delta, best_U = delta, U
+                pair_deltas[i, j] = best_delta
+                if best_U is None:
+                    pair_unitaries.pop((i, j), None)
+                else:
+                    pair_unitaries[i, j] = best_U
+
+            # Row-major argmin preserves the original lexicographic pair tie rule.
+            best_index = int(np.argmin(pair_deltas)) if m > 1 else None
+            best_delta = int(pair_deltas.flat[best_index]) if best_index is not None else 0
+            if best_delta >= 0:
+                stop_reason = "no_improvement"
+                if verbose:
+                    print(f"  Step {step}: no improvement found, stopping.")
+                break
+
+            i, j = divmod(best_index, m)
+            best_pair = (i, j)
+            best_U = pair_unitaries[best_pair]
+            new_i, new_j = rotated_rows(i, j, best_U)
+            current_A[i], current_A[j] = new_i, new_j
+            row_supports[i] = int(np.sum(np.abs(new_i) > tol))
+            row_supports[j] = int(np.sum(np.abs(new_j) > tol))
+
+            if needs_initial_cleanup:
+                current_A[np.abs(current_A) < tol] = 0.0
+                dirty_pairs = combinations(range(m), 2)
+                needs_initial_cleanup = False
+            else:
+                dirty_pairs = [(min(i, k), max(i, k)) for k in range(m) if k != i]
+                dirty_pairs.extend(
+                    (min(j, k), max(j, k)) for k in range(m) if k not in (i, j)
+                )
+
+            current_support += best_delta
+            support_trajectory.append(current_support)
             steps.append((best_pair, best_U, current_support))
             if verbose:
                 print(f"  Step {step}: apply U on pair {best_pair}, "
@@ -1232,18 +1341,15 @@ class channel_ensemble:
         assert len(channels) == len(probs), "Length of channels and probs must match." 
         for i, channel in enumerate(channels):
             self.length.append(max([inst.length for inst in channel]))
-            for inst in channel:
+            for j, inst in enumerate(channel):
                 assert isinstance(inst, Matrixsum), "Each Kraus operator must be a Matrixsum."
-                
+                channel[j] = inst.eliminate_global_phase()
                 self.size = inst.size
             self.channels.append((probs[i], channel))
 
     
 
 
-
-
-        
 if __name__ == "__main__":
     # A = -1j * np.array([[np.exp(-1j * np.pi/4),0],[0, np.exp(1j * np.pi/4)]])
     # pa1 = PauliAtom('XIZ', phase=1.0)

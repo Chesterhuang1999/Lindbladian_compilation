@@ -9,6 +9,8 @@ cost `C = Σ w(ctrl) · w_s(g_l)` (Möbius output). All other behaviour
 
 from __future__ import annotations
 
+import os
+
 import numpy as np
 from qiskit import QuantumCircuit, QuantumRegister
 from qiskit.circuit.controlledgate import ControlledGate
@@ -24,7 +26,7 @@ from block_encoding import (
     extract_basis_modes_with_phases,
     mobius_invert_modes_with_phases,
 )
-from placement_search import search_for_pauli_placement
+from placement_search import analyze_placement_structure, search_for_pauli_placement
 
 
 def _pauli_label_to_symplectic_vector(label: str) -> np.ndarray:
@@ -94,7 +96,11 @@ def _pauli_label_from_operation(operation, qubit_count: int) -> str | None:
 
 
 def _pauli_ops_from_label(label: str) -> list[tuple[str, int]]:
-    return [(char, index) for index, char in enumerate(label) if char != "I"]
+    return [
+        (char, len(label) - 1 - label_index)
+        for label_index, char in enumerate(label)
+        if char != "I"
+    ]
 
 
 def _single_qubit_pauli_data_from_definition(
@@ -151,7 +157,7 @@ def _single_qubit_pauli_data_from_definition(
         qargs = list(instruction.qubits)
         label = _pauli_label_from_operation(op, len(qargs))
         if label is not None:
-            for offset, char in enumerate(label):
+            for char, offset in _pauli_ops_from_label(label):
                 target_index = definition.find_bit(qargs[offset]).index
                 if not apply_pauli(target_index, char):
                     return None
@@ -1122,30 +1128,42 @@ def expand_large_controlled_gates(
     if_optimize = False,
 ) -> QuantumCircuit:
     """
-    Expand every controlled gate with N >= 3 controls.
+    Expand every controlled gate with N >= 3 controls, plus two-control
+    high-weight controlled Pauli-string gates.
 
     A gate C^N(U) is usually rewritten using N - 2 clean ancilla qubits as a
     Toffoli compute ladder, one two-controlled U gate, and the reverse Toffoli
     ladder. If U is a tensor Pauli with weight at least 3, the pass instead
     computes the full conjunction of all N controls into N - 1 clean ancillas,
     applies one single-control Pauli gate per non-identity target, then
-    uncomputes the conjunction. Open controls are handled by temporary X
-    conjugations, matching Qiskit's ctrl_state convention where the rightmost
-    control-state bit corresponds to the first control qubit in qargs.
+    uncomputes the conjunction. The same full-control Pauli path is also used
+    for C^2(P) when P is a tensor Pauli with weight at least 3; that case uses
+    one clean work qubit for the temporary conjunction of the two controls.
+    Open controls are handled by temporary X conjugations, matching Qiskit's
+    ctrl_state convention where the rightmost control-state bit corresponds to
+    the first control qubit in qargs.
 
     The returned circuit reuses the original circuit registers and appends one
-    ancilla register sized for the largest expanded gate. Gates with fewer than
-    three controls are copied unchanged.
+    ancilla register sized for the largest expanded gate. Non-Pauli gates with
+    fewer than three controls are copied unchanged.
     """
     max_ancillas = 0
     for instruction in qc.data:
         op = instruction.operation
-        if isinstance(op, ControlledGate) and op.num_ctrl_qubits >= 3:
+        if isinstance(op, ControlledGate):
+            ctrl_count = int(op.num_ctrl_qubits)
             pauli_data = _controlled_gate_single_qubit_pauli_data(op)
-            if pauli_data is not None and len(pauli_data["ops"]) >= 3:
-                max_ancillas = max(max_ancillas, int(op.num_ctrl_qubits) - 1)
-            else:
-                max_ancillas = max(max_ancillas, int(op.num_ctrl_qubits) - 2)
+            use_full_control_pauli_expansion = (
+                pauli_data is not None
+                and len(pauli_data["ops"]) >= 3
+            )
+            if ctrl_count >= 3:
+                if use_full_control_pauli_expansion:
+                    max_ancillas = max(max_ancillas, ctrl_count - 1)
+                else:
+                    max_ancillas = max(max_ancillas, ctrl_count - 2)
+            elif ctrl_count == 2 and use_full_control_pauli_expansion:
+                max_ancillas = max(max_ancillas, 1)
 
     expanded = QuantumCircuit(*qc.qregs, *qc.cregs, name=qc.name)
     expanded.global_phase = qc.global_phase
@@ -1168,7 +1186,7 @@ def expand_large_controlled_gates(
         qargs = list(instruction.qubits)
         clbits = list(instruction.clbits)
 
-        if not isinstance(op, ControlledGate) or op.num_ctrl_qubits < 3:
+        if not isinstance(op, ControlledGate):
             expanded.append(op, qargs, clbits)
             continue
 
@@ -1181,7 +1199,19 @@ def expand_large_controlled_gates(
         pauli_data = _controlled_gate_single_qubit_pauli_data(op)
         pauli_ops = None if pauli_data is None else pauli_data["ops"]
         use_full_control_pauli_expansion = pauli_ops is not None and len(pauli_ops) >= 3
-        work_size = ctrl_count - 1 if use_full_control_pauli_expansion else ctrl_count - 2
+        should_expand = (
+            ctrl_count >= 3
+            or (ctrl_count == 2 and use_full_control_pauli_expansion)
+        )
+        if not should_expand:
+            expanded.append(op, qargs, clbits)
+            continue
+
+        work_size = (
+            ctrl_count - 1
+            if use_full_control_pauli_expansion
+            else ctrl_count - 2
+        )
         work = ancillas[:work_size]
         ctrl_bits = _ctrl_state_bits(op)
 
@@ -1233,6 +1263,46 @@ expand_larger_controlled_gates = expand_large_controlled_gates
 class BlockEncoding(_LegacyBlockEncoding):
     """Block-encoding with multi-candidate (k = w, w-1) basis selection."""
 
+    def mulplex_U_opt_order(self):
+        sys_size = self.sys_size
+        coeff_mode_dict, ctrl_size = self.find_optimal_order_matrices()
+        modes_with_phase = self.mobius_phase_result['g_modes_with_phase']
+        ctrl_reg, sys_reg = QuantumRegister(ctrl_size, 'ctrl'), QuantumRegister(sys_size, 'sys')
+        qc_u = QuantumCircuit(ctrl_reg, sys_reg)
+        mccount = 0
+        cxcount = 0
+        self.coeff_list_ordered = np.zeros((1 << ctrl_size), dtype=complex)
+        for ctrl_value, coeff in coeff_mode_dict.items():
+            self.coeff_list_ordered[int(ctrl_value, 2)] = coeff
+
+        for pauli_label, ctrl_value, phase in modes_with_phase:
+            qc_pauli = QuantumCircuit(len(pauli_label))
+            pauli_op = Pauli(pauli_label)
+            qc_pauli.append(pauli_op, range(len(pauli_label)))
+            qc_pauli.global_phase = np.pi * phase / 2
+            qc_pauli = qc_pauli.decompose()
+            ## Match qiskit's ctrl_state ordering in mulplex_U:
+            ## rightmost bit in ctrl_value corresponds to lower-index control qubit.
+            active_ctrls = [i for i, bit in enumerate(ctrl_value[::-1]) if bit == '1']
+            pauli_weight = sum(1 for ch in pauli_label if ch != 'I')
+            if len(active_ctrls) == 0:
+                qc_u.append(qc_pauli.to_gate(), list(range(ctrl_size, ctrl_size + sys_size)))
+            else:
+                ctrl_U_elem = qc_pauli.to_gate().control(
+                    num_ctrl_qubits=len(active_ctrls),
+                    ctrl_state='1' * len(active_ctrls),
+                )
+                qargs = active_ctrls + list(range(ctrl_size, ctrl_size + sys_size))
+                qc_u.append(ctrl_U_elem, qargs)
+                if len(active_ctrls) == 1:
+                    cxcount += pauli_weight
+                else:
+                    mccount += (len(active_ctrls) - 1) * pauli_weight
+
+        tcount = mccount * 4
+        cxcount += mccount * 4
+        return qc_u, tcount, mccount, cxcount, ctrl_size
+
     def circuit(self, opt=None):
         if opt != 'Matrix-order':
             return super().circuit(opt=opt)
@@ -1241,7 +1311,10 @@ class BlockEncoding(_LegacyBlockEncoding):
         self.cxcount = 0
 
         qc_u, tcount, mccount, cxcount, ctrl_size = self.mulplex_U_opt_order()
-        qc_u = expand_larger_controlled_gates(qc_u)
+        qc_u = expand_large_controlled_gates(
+            qc_u,
+            if_optimize=True,
+        )
 
         qc_select = self.mulplex_B_opt_order(ctrl_size)
         ctrl = QuantumRegister(ctrl_size, 'ctrl')
@@ -1381,16 +1454,6 @@ class BlockEncoding(_LegacyBlockEncoding):
             best = min(candidates, key=lambda c: (c['cost'], -c['k'], -c['coverage'], c['crit']))
             return best, candidates
 
-        allow_zero_address = identity_label is None and len(pauli_list) > (2 ** w - 1)
-        padding_to_full_address = (
-            not allow_zero_address
-            and identity_label is None
-            and len(pauli_list) < (2 ** w - 1)
-        )
-        is_full_address = (
-            not allow_zero_address
-            and (len(pauli_list) == (2 ** w - 1) or padding_to_full_address)
-        )
         real_pauli_count = len(pauli_list)
         if real_pauli_count <= 256:
             search_profile = {
@@ -1412,37 +1475,159 @@ class BlockEncoding(_LegacyBlockEncoding):
                 "mixed_random_count": 64,
                 "future_exact_address_limit": 8,
             }
-        additional_modes, placement_debug = search_for_pauli_placement(
-            self.J,
-            m=w,
-            beam_width=search_profile["beam_width"],
-            layer_candidate_limit=search_profile["layer_candidate_limit"],
-            max_exact_layer_assignments=search_profile["max_exact_layer_assignments"],
-            future_exact_address_limit=search_profile["future_exact_address_limit"],
-            initial_strategy="mixed",
-            mixed_full_initial_beam_width=search_profile["mixed_initial_beam_width"],
-            mixed_nonfull_initial_beam_width=search_profile["mixed_initial_beam_width"],
-            mixed_low_weight_count=search_profile["mixed_low_weight_count"],
-            mixed_random_count=search_profile["mixed_random_count"],
-            swap_refinement=True,
-            swap_refinement_max_terms=16,
-            padding_to_full_address=padding_to_full_address,
-            allow_zero_address=allow_zero_address,
-            return_debug=True,
+        for key in ("beam_width", "layer_candidate_limit", "max_exact_layer_assignments",
+                    "mixed_initial_beam_width"):
+            env_name = f"CHANNEL_LCU_PLACEMENT_{key.upper()}"
+            if env_name in os.environ:
+                value = int(os.environ[env_name])
+                if value < 1:
+                    raise ValueError(f"{env_name} must be a positive integer")
+                search_profile[key] = value
+        placement_structure = analyze_placement_structure(self.J)
+
+        def _axis_analysis_to_debug(axis_info):
+            return {
+                "axis": axis_info.axis,
+                "term_count": axis_info.term_count,
+                "unique": axis_info.unique,
+                "rank": axis_info.rank,
+                "generator_labels": list(axis_info.generator_labels),
+                "shortcut_available": axis_info.shortcut_available,
+                "rank_width": axis_info.rank_width,
+                "viable_width": axis_info.viable_width,
+                "fixed_cost": axis_info.fixed_cost,
+            }
+
+        placement_structure_debug = {
+            "num_qubits": placement_structure.num_qubits,
+            "term_count": placement_structure.term_count,
+            "identity_index": placement_structure.identity_index,
+            "min_width": placement_structure.min_width,
+            "subgroup_rank": placement_structure.subgroup_rank,
+            "subgroup_viable_width": placement_structure.subgroup_viable_width,
+            "axis": {
+                name: _axis_analysis_to_debug(axis_info)
+                for name, axis_info in placement_structure.axis.items()
+            },
+            "suggested_widths": list(placement_structure.suggested_widths),
+        }
+        rank_width_heuristic_enabled = (
+            os.environ.get("CHANNEL_LCU_ENABLE_RANK_WIDTH_HEURISTIC") == "1"
         )
-        placement_debug["search_profile"] = search_profile
-        if placement_debug.get("padding_count", 0) > 0:
-            additional_modes = placement_debug["padded_placement"]
-        additional_modes = sorted(additional_modes, key=lambda x: int(x[1], 2))
-        vec_phase_lookup = build_vec_phase_lookup(symplectic_matrix, phase_array)
-        for padding_label in placement_debug.get("padding_labels", []):
-            padding_vec = _pauli_label_to_symplectic_vector(padding_label)
-            vec_phase_lookup.setdefault(padding_vec.tobytes(), 0.0)
-        mobius_result = mobius_invert_modes_with_phases(
-            w, additional_modes, vec_phase_lookup, zero_phase
+        if rank_width_heuristic_enabled:
+            structural_widths = {
+                axis_info.viable_width
+                for axis_info in placement_structure.axis.values()
+                if (
+                    axis_info.shortcut_available
+                    and axis_info.viable_width is not None
+                    and axis_info.viable_width >= w
+                )
+            }
+            if (
+                placement_structure.subgroup_viable_width is not None
+                and placement_structure.subgroup_viable_width >= w
+            ):
+                structural_widths.add(placement_structure.subgroup_viable_width)
+            candidate_widths = tuple(
+                sorted(width for width in structural_widths if width is not None)
+            )
+            if len(candidate_widths) == 0:
+                candidate_widths = tuple(
+                    width
+                    for width in placement_structure.suggested_widths
+                    if width >= w
+                )
+            if len(candidate_widths) == 0:
+                candidate_widths = (w,)
+        else:
+            candidate_widths = (w,)
+        if os.environ.get("CHANNEL_LCU_FORCE_ORIGINAL_CTRL_WIDTH") == "1":
+            candidate_widths = (w,)
+        placement_structure_debug["rank_width_heuristic_enabled"] = (
+            rank_width_heuristic_enabled
         )
-        g_modes = mobius_result['g_modes_with_phase']
-        final_cost = sum(ctrl.count('1') * _pauli_weight(label) for label, ctrl, _ in g_modes)
+
+        def _run_width_candidate(candidate_w):
+            allow_zero_address = (
+                identity_label is None and len(pauli_list) > (2 ** candidate_w - 1)
+            )
+            padding_to_full_address = (
+                not allow_zero_address
+                and identity_label is None
+                and len(pauli_list) < (2 ** candidate_w - 1)
+            )
+            candidate_modes, candidate_debug = search_for_pauli_placement(
+                self.J,
+                m=candidate_w,
+                beam_width=search_profile["beam_width"],
+                layer_candidate_limit=search_profile["layer_candidate_limit"],
+                max_exact_layer_assignments=search_profile["max_exact_layer_assignments"],
+                future_exact_address_limit=search_profile["future_exact_address_limit"],
+                initial_strategy="mixed",
+                mixed_full_initial_beam_width=search_profile["mixed_initial_beam_width"],
+                mixed_nonfull_initial_beam_width=search_profile["mixed_initial_beam_width"],
+                mixed_low_weight_count=search_profile["mixed_low_weight_count"],
+                mixed_random_count=search_profile["mixed_random_count"],
+                swap_refinement=True,
+                swap_refinement_max_terms=16,
+                padding_to_full_address=padding_to_full_address,
+                allow_zero_address=allow_zero_address,
+                return_debug=True,
+            )
+            candidate_debug["search_profile"] = search_profile
+            candidate_debug["candidate_width"] = candidate_w
+            candidate_debug["candidate_widths"] = list(candidate_widths)
+            candidate_debug["placement_structure"] = placement_structure_debug
+            if candidate_debug.get("padding_count", 0) > 0:
+                candidate_modes = candidate_debug["padded_placement"]
+            candidate_modes = sorted(candidate_modes, key=lambda x: int(x[1], 2))
+
+            candidate_vec_phase_lookup = build_vec_phase_lookup(
+                symplectic_matrix, phase_array
+            )
+            for padding_label in candidate_debug.get("padding_labels", []):
+                padding_vec = _pauli_label_to_symplectic_vector(padding_label)
+                candidate_vec_phase_lookup.setdefault(padding_vec.tobytes(), 0.0)
+            candidate_mobius = mobius_invert_modes_with_phases(
+                candidate_w,
+                candidate_modes,
+                candidate_vec_phase_lookup,
+                zero_phase,
+            )
+            g_modes = candidate_mobius['g_modes_with_phase']
+            final_cost = sum(
+                ctrl.count('1') * _pauli_weight(label)
+                for label, ctrl, _ in g_modes
+            )
+            return {
+                "w": candidate_w,
+                "additional_modes": candidate_modes,
+                "placement_debug": candidate_debug,
+                "vec_phase_lookup": candidate_vec_phase_lookup,
+                "mobius_result": candidate_mobius,
+                "final_cost": final_cost,
+            }
+
+        width_candidate_results = [
+            _run_width_candidate(candidate_w)
+            for candidate_w in candidate_widths
+        ]
+        best_width_candidate = min(
+            width_candidate_results,
+            key=lambda result: (
+                result["final_cost"],
+                result["placement_debug"].get("best_cost", float("inf")),
+                result["w"],
+            ),
+        )
+
+        w = best_width_candidate["w"]
+        additional_modes = best_width_candidate["additional_modes"]
+        placement_debug = best_width_candidate["placement_debug"]
+        vec_phase_lookup = best_width_candidate["vec_phase_lookup"]
+        mobius_result = best_width_candidate["mobius_result"]
+        final_cost = best_width_candidate["final_cost"]
 
         self.additional_modes = additional_modes
         self.candidate_costs = [
@@ -1457,6 +1642,22 @@ class BlockEncoding(_LegacyBlockEncoding):
                 search_profile,
             )
         ]
+        self.width_candidate_costs = [
+            {
+                "w": result["w"],
+                "pre_refinement_cost": result["placement_debug"].get("pre_refinement_cost"),
+                "best_cost": result["placement_debug"].get("best_cost"),
+                "padded_search_cost": result["placement_debug"].get("padded_search_cost"),
+                "final_cost": result["final_cost"],
+                "padding_count": result["placement_debug"].get("padding_count"),
+                "shortcut": result["placement_debug"].get("shortcut"),
+                "shortcut_axis": result["placement_debug"].get("shortcut_axis"),
+                "shortcut_rank": result["placement_debug"].get("shortcut_rank"),
+                "shortcut_terms": result["placement_debug"].get("shortcut_terms"),
+            }
+            for result in width_candidate_results
+        ]
+        self.placement_width_analysis = placement_structure_debug
         self.selected_k = w
         self.selected_crit = 'mixed-placement-search'
         self.placement_search_debug = placement_debug
@@ -1568,6 +1769,7 @@ def _test_high_weight_controlled_pauli_expansion_example() -> None:
     qc.append(ctrl_pauli, list(ctrl) + list(sys))
 
     expanded = expand_large_controlled_gates(qc)
+    print(expanded.draw())
     expanded_ops = [
         (
             instruction.operation.name,
@@ -1590,5 +1792,6 @@ def _test_high_weight_controlled_pauli_expansion_example() -> None:
 
 
 if __name__ == "__main__":
-    _test_complex_boolean_expression_encoding_example()
+    print('ok')
+    # _test_complex_boolean_expression_encoding_example()
     _test_high_weight_controlled_pauli_expansion_example()

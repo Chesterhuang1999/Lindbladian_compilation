@@ -1,0 +1,19 @@
+{
+  "best_evaluation_id": "e_263d84525c4e47f9d22df25f",
+  "expected_gate_count": 2362.0,
+  "stop_reason": "diagnostic_grid_or_budget_completed",
+  "budget": {
+    "used": {
+      "cpu_seconds": 22.307387747,
+      "tool_wall_seconds": 19.67222104081884,
+      "lowering_calls": 3,
+      "cache_hits": 0,
+      "elapsed_wall_seconds": 19.794144868850708
+    },
+    "remaining": {
+      "wall_seconds": 280.2058551311493,
+      "cpu_seconds": 157.692612253,
+      "lowering_calls": 0
+    }
+  }
+}

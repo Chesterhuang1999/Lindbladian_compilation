@@ -1,0 +1,20 @@
+test_complex_nonidentity_zero_address (test_interfaces.InterfaceTests.test_complex_nonidentity_zero_address) ... ok
+test_content_identity_preserves_order_and_phase (test_interfaces.InterfaceTests.test_content_identity_preserves_order_and_phase) ... ok
+test_diagnostic_trace_does_not_change_legacy_winner (test_interfaces.InterfaceTests.test_diagnostic_trace_does_not_change_legacy_winner) ... ok
+test_export_equivalence_cursor_and_incomplete_bundle (test_interfaces.InterfaceTests.test_export_equivalence_cursor_and_incomplete_bundle) ... ok
+test_interfaces_cache_and_frontier (test_interfaces.InterfaceTests.test_interfaces_cache_and_frontier) ... ok
+test_legacy_default_unchanged (test_interfaces.InterfaceTests.test_legacy_default_unchanged) ... ok
+test_padding_and_single_identity (test_interfaces.InterfaceTests.test_padding_and_single_identity) ... ok
+test_tfim_physical_coefficients_and_channel_semantics (test_interfaces.InterfaceTests.test_tfim_physical_coefficients_and_channel_semantics) ... ok
+test_timeout_charged_and_no_best (test_interfaces.InterfaceTests.test_timeout_charged_and_no_best) ... ok
+test_fractional_score_not_truncated (test_synced_baseline.SyncedBaselineTests.test_fractional_score_not_truncated) ... ok
+test_hrw_full_nam_pair_and_cache (test_synced_baseline.SyncedBaselineTests.test_hrw_full_nam_pair_and_cache) ... {"smoke": "HRW-2", "C_before": 3172.0, "C_after": 622.0}
+ok
+test_paper_score_scale_includes_lambda_once (test_synced_baseline.SyncedBaselineTests.test_paper_score_scale_includes_lambda_once) ... ok
+test_scrambled_has_same_upper_landscape (test_synced_baseline.SyncedBaselineTests.test_scrambled_has_same_upper_landscape) ... ok
+test_upstream_default_preserved (test_synced_baseline.SyncedBaselineTests.test_upstream_default_preserved) ... ok
+
+----------------------------------------------------------------------
+Ran 14 tests in 50.247s
+
+OK

@@ -331,7 +331,9 @@ def random_coloring_metadata(spec: RandomColoringSpec) -> dict[str, Any]:
     neighbors = neighbor_sets(spec.n, edges)
     max_degree = max((len(nbrs) for nbrs in neighbors), default=0)
     metadata = random_coloring_model_info(spec, edges, max_degree)
-    metadata["kraus_color_mixing"] = "walsh_hadamard_by_vertex"
+    metadata["kraus_color_mixing"] = "none"
+    metadata["generation_color_mixing"] = "none"
+    metadata["rewrite_stage_color_mixing"] = "walsh_hadamard_by_vertex"
     return metadata
 
 
@@ -379,11 +381,29 @@ def prepare_random_coloring_case(args: argparse.Namespace, spec: RandomColoringS
 
 def prepare_dqe_case(args: argparse.Namespace, spec: DqeSpec) -> dict[str, Any]:
     case = spec.name
+    if args.dqe_kraus_prefix is not None:
+        case = f"{case}_krausprefix{args.dqe_kraus_prefix}"
     target_dir = Path(args.out_root) / case
     summary_dir = Path(args.summary_root) / case
     started = time.perf_counter()
     channel, metadata = build_repetition_dqe_channel(spec)
-    stats = dqe_channel_metrics(channel)
+    full_stats = dqe_channel_metrics(channel)
+    stats = full_stats
+    if args.dqe_kraus_prefix is not None:
+        if args.dqe_kraus_prefix <= 0:
+            raise ValueError("--dqe-kraus-prefix must be positive when provided.")
+        prefix_count = min(args.dqe_kraus_prefix, len(channel))
+        channel = channel[:prefix_count]
+        stats = dqe_channel_metrics(channel)
+        metadata = dict(metadata)
+        metadata.update(
+            {
+                "diagnostic": "kraus_prefix_channel_lcu",
+                "full_channel_metrics": full_stats,
+                "selected_kraus_indices": list(range(prefix_count)),
+                "selected_kraus_count": prefix_count,
+            }
+        )
     try:
         kraus_ops = [pauli_dict_to_matrixsum(copy.deepcopy(kraus)) for kraus in channel]
         result = prepare_raw_basis_qasm_with_timeout(
@@ -419,6 +439,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--random-graphs", nargs="+", choices=("cycle", "complete"), default=["cycle", "complete"])
     parser.add_argument("--dqe-d", nargs="+", type=int, default=[5])
     parser.add_argument("--dqe-epsilon", type=float, default=0.25)
+    parser.add_argument(
+        "--dqe-kraus-prefix",
+        type=int,
+        default=None,
+        help="Diagnostic mode: keep only the first N DQE Kraus operators before channel-LCU synthesis.",
+    )
     parser.add_argument("--tol", type=float, default=1e-12)
     parser.add_argument("--max-total-pauli-terms", type=int, default=250_000)
     parser.add_argument("--max-terms-per-kraus", type=int, default=50_000)

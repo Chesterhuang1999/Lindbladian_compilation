@@ -7,7 +7,11 @@ import sympy as sp
 from qiskit import QuantumCircuit, QuantumRegister, transpile
 from qiskit.quantum_info import Statevector, Operator, SparsePauliOp, Pauli
 from qiskit.circuit.library import StatePreparation, XGate
-from qiskit_aer import noise, AerSimulator
+try:
+    from qiskit_aer import noise, AerSimulator
+except ImportError:
+    noise = None
+    AerSimulator = None
 
 from qsppack.utils import cvx_poly_coef, chebyshev_to_func
 from qsppack.solver import solve
@@ -395,6 +399,166 @@ def mulplex_U_opt(opt_circuit, circuits, ctrl_size, sub_ctrl_size, sys_size, gat
                 cxcount += 1
             else:
                 opt_circuit.x(anc_regs[0])
+
+    return opt_circuit, cxcount, tcount, mccount
+
+
+def mulplex_U_tree(opt_circuit, circuits, ctrl_size, sub_ctrl_size, sys_size):
+    """
+    Balanced-tree unary-iteration SELECT over a list of block circuits.
+
+    The layout matches ``mulplex_U_opt``:
+    select qubits occupy even positions ``0, 2, ...``, tree/path ancillas
+    occupy odd positions ``1, 3, ...``, followed by the shared per-block
+    control/work register and the system register.  The traversal mirrors
+    Qrisp's ``q_switch(..., method="tree")`` pattern.
+    """
+    mccount = 0
+    tcount = 0
+    cxcount = 0
+    t_counts_per_ccx = 4
+    cx_counts_per_ccx = 4
+
+    if len(circuits) == 0:
+        return opt_circuit, cxcount, tcount, mccount
+
+    sys_start = 2 * ctrl_size + sub_ctrl_size
+
+    def append_branch(branch_index, control_qubit):
+        nonlocal cxcount, mccount
+        if branch_index >= len(circuits):
+            return
+
+        circ = circuits[branch_index]
+        ctrl_numq = circ.num_qubits - sys_size
+        tqc = transpile(circ, basis_gates=['cx', 'u3'], optimization_level=1)
+        ops_raw = tqc.count_ops()
+        ops = {str(k): int(v) for k, v in ops_raw.items()}
+        sub_cxcount, sub_tcount = int(ops.get('cx', 0)), int(ops.get('u3', 0))
+
+        qargs = (
+            [control_qubit]
+            + list(range(2 * ctrl_size, 2 * ctrl_size + ctrl_numq))
+            + list(range(sys_start, sys_start + sys_size))
+        )
+        opt_circuit.append(
+            circ.to_gate().control(num_ctrl_qubits=1, ctrl_state='1'),
+            qargs,
+        )
+        cxcount += sub_tcount
+        mccount += sub_cxcount
+
+    if ctrl_size == 0:
+        circ = circuits[0]
+        ctrl_numq = circ.num_qubits - sys_size
+        qargs = list(range(0, ctrl_numq)) + list(range(sub_ctrl_size, sub_ctrl_size + sys_size))
+        opt_circuit.compose(circ, qubits=qargs, inplace=True)
+        return opt_circuit, cxcount, tcount, mccount
+
+    sel_regs = [2 * j for j in range(ctrl_size)]
+    anc_regs = [2 * j + 1 for j in range(ctrl_size)]
+
+    def select_qubit(depth):
+        return sel_regs[depth]
+
+    def anc_qubit(depth):
+        return anc_regs[depth]
+
+    def append_cx(control, target):
+        nonlocal cxcount
+        opt_circuit.cx(control, target)
+        cxcount += 1
+
+    def append_ccx(control_a, control_b, target):
+        nonlocal mccount, tcount, cxcount
+        opt_circuit.ccx(control_a, control_b, target)
+        mccount += 1
+        tcount += t_counts_per_ccx
+        cxcount += cx_counts_per_ccx
+
+    def down(depth):
+        ctrl = select_qubit(depth)
+        target = anc_qubit(depth)
+        opt_circuit.x(ctrl)
+        if depth == 0:
+            append_cx(ctrl, target)
+        else:
+            append_ccx(ctrl, anc_qubit(depth - 1), target)
+        opt_circuit.x(ctrl)
+
+    def up(depth):
+        ctrl = select_qubit(depth)
+        target = anc_qubit(depth)
+        if depth == 0:
+            append_cx(ctrl, target)
+        else:
+            append_ccx(ctrl, anc_qubit(depth - 1), target)
+
+    def bounce(depth):
+        if depth <= 0:
+            raise ValueError("Tree bounce depth must be positive.")
+
+        previous = anc_qubit(depth - 1)
+        target = anc_qubit(depth)
+        if depth == 1:
+            opt_circuit.x(previous)
+        else:
+            append_cx(anc_qubit(depth - 2), previous)
+
+        append_cx(previous, target)
+
+        ctrl = select_qubit(depth)
+        if depth == 1:
+            append_cx(ctrl, target)
+        else:
+            append_ccx(ctrl, anc_qubit(depth - 2), target)
+
+    def leaf(first_branch):
+        leaf_ctrl = anc_qubit(ctrl_size - 1)
+        append_branch(first_branch, leaf_ctrl)
+
+        if ctrl_size == 1:
+            opt_circuit.x(leaf_ctrl)
+        else:
+            append_cx(anc_qubit(ctrl_size - 2), leaf_ctrl)
+
+        append_branch(first_branch + 1, leaf_ctrl)
+
+    def last_leaf(branch_index):
+        append_branch(branch_index, anc_qubit(ctrl_size - 1))
+
+    def bitwise_count_diff(left, right):
+        return int((left ^ right).bit_count())
+
+    branch_amount = len(circuits)
+
+    for depth in range(ctrl_size):
+        down(depth)
+
+    for pos in range(0, -(-branch_amount // 2) - 1):
+        leaf(2 * pos)
+
+        diff_depth = bitwise_count_diff(pos, pos + 1)
+        for j in range(0, diff_depth - 1):
+            up(ctrl_size - j - 1)
+        bounce(ctrl_size - diff_depth)
+        for j in range(0, diff_depth - 1):
+            down(ctrl_size - (diff_depth - 1) + j)
+
+    if branch_amount % 2 == 0:
+        leaf(branch_amount - 2)
+    else:
+        last_leaf(branch_amount - 1)
+
+    diff = 2**ctrl_size - branch_amount
+    for j in range(ctrl_size):
+        depth = ctrl_size - j - 1
+        up(depth)
+        if (diff >> j) & 1:
+            if depth == 0:
+                opt_circuit.x(anc_qubit(depth))
+            else:
+                append_cx(anc_qubit(depth - 1), anc_qubit(depth))
 
     return opt_circuit, cxcount, tcount, mccount
 

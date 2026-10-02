@@ -1,12 +1,21 @@
 from channel_IR import *
 from qiskit import QuantumCircuit, QuantumRegister, transpile
 from qiskit.quantum_info import SparsePauliOp, Statevector, DensityMatrix, partial_trace, PauliList, Pauli
-from qiskit.circuit.library import StatePreparation
+from qiskit.circuit.library import StatePreparation, UnitaryGate
 from subroutine import lcu_prepare_tree, count_multiq_gates
 import numpy as np
-from qiskit_aer import AerSimulator
+try:
+    from qiskit_aer import AerSimulator
+except ImportError:
+    AerSimulator = None
 from qiskit.circuit.controlledgate import ControlledGate
 from itertools import product
+
+
+def _require_aer_simulator():
+    if AerSimulator is None:
+        raise ImportError("qiskit_aer.AerSimulator is required for simulation helpers.")
+    return AerSimulator
 def sort_symplectic_matrix(matrix, phases, crit = 'z'):
 
     n = matrix.shape[1] // 2    
@@ -908,6 +917,152 @@ class BlockEncoding:
                     opt_circuit.x(anc_regs[0])
         # opt_circuit.x(0)
         return opt_circuit, tcount, mccount, cxcount
+
+    def mulplex_U_tree(self, mat_list, ctrl_size, sys_size):
+        """
+        Balanced-tree unary-iteration SELECT.
+
+        This mirrors Qrisp's default q_switch(..., method="tree") traversal:
+        a path predicate is maintained in ``ctrl_size`` clean ancillas, two
+        neighboring leaves are handled per leaf visit, and the path is moved by
+        up/bounce/down operations instead of recomputing a full equality test
+        for every SELECT branch.
+        """
+        if ctrl_size == 0:
+            return self.mulplex_U(mat_list, ctrl_size, sys_size)
+
+        ctrl_reg = QuantumRegister(ctrl_size, 'ctrl')
+        anc_reg = QuantumRegister(ctrl_size, 'tree_anc')
+        sys_reg = QuantumRegister(sys_size, 'sys')
+        qc = QuantumCircuit(ctrl_reg, anc_reg, sys_reg)
+
+        mccount = 0
+        cxcount = 0
+
+        def ctrl_qubit(depth):
+            return ctrl_reg[ctrl_size - 1 - depth]
+
+        def anc_qubit(depth):
+            return anc_reg[depth]
+
+        def append_cx(control, target):
+            nonlocal cxcount
+            qc.cx(control, target)
+            cxcount += 1
+
+        def append_ccx(control_a, control_b, target):
+            nonlocal mccount, cxcount
+            qc.ccx(control_a, control_b, target)
+            mccount += 1
+            cxcount += 4
+
+        def append_pauli_branch(branch_index, control):
+            nonlocal cxcount
+            if branch_index >= len(mat_list):
+                return
+
+            ms = mat_list[branch_index]
+            if isinstance(ms, tuple) or isinstance(ms, list):
+                pauli_op, phase = Pauli(ms[0]), ms[1]
+                qc_pauli = QuantumCircuit(pauli_op.num_qubits)  # type: ignore
+                qc_pauli.append(pauli_op, range(pauli_op.num_qubits))  # type: ignore
+                qc_pauli.global_phase = np.angle(phase)
+                qc_pauli = qc_pauli.decompose()
+                controlled = qc_pauli.to_gate().control(num_ctrl_qubits=1, ctrl_state='1')
+                qc.append(controlled, [control] + list(sys_reg))
+                cxcount += sum(1 for ch in str(pauli_op.to_label()) if ch != 'I')
+            else:
+                if ms.shape[0] < 2**sys_size:
+                    pad_size = 2**sys_size // ms.shape[0]
+                    ms = np.kron(ms, np.eye(pad_size))
+                controlled = UnitaryGate(ms).control(num_ctrl_qubits=1, ctrl_state='1')
+                qc.append(controlled, [control] + list(sys_reg))
+
+        def down(depth):
+            ctrl = ctrl_qubit(depth)
+            target = anc_qubit(depth)
+            qc.x(ctrl)
+            if depth == 0:
+                append_cx(ctrl, target)
+            else:
+                append_ccx(ctrl, anc_qubit(depth - 1), target)
+            qc.x(ctrl)
+
+        def up(depth):
+            ctrl = ctrl_qubit(depth)
+            target = anc_qubit(depth)
+            if depth == 0:
+                append_cx(ctrl, target)
+            else:
+                append_ccx(ctrl, anc_qubit(depth - 1), target)
+
+        def bounce(depth):
+            if depth <= 0:
+                raise ValueError("Tree bounce depth must be positive.")
+            previous = anc_qubit(depth - 1)
+            target = anc_qubit(depth)
+            if depth == 1:
+                qc.x(previous)
+            else:
+                append_cx(anc_qubit(depth - 2), previous)
+
+            append_cx(previous, target)
+
+            ctrl = ctrl_qubit(depth)
+            if depth == 1:
+                append_cx(ctrl, target)
+            else:
+                append_ccx(ctrl, anc_qubit(depth - 2), target)
+
+        def leaf(first_branch):
+            leaf_ctrl = anc_qubit(ctrl_size - 1)
+            append_pauli_branch(first_branch, leaf_ctrl)
+
+            if ctrl_size == 1:
+                qc.x(leaf_ctrl)
+            else:
+                append_cx(anc_qubit(ctrl_size - 2), leaf_ctrl)
+
+            append_pauli_branch(first_branch + 1, leaf_ctrl)
+
+        def last_leaf(branch_index):
+            append_pauli_branch(branch_index, anc_qubit(ctrl_size - 1))
+
+        def bitwise_count_diff(left, right):
+            return int((left ^ right).bit_count())
+
+        branch_amount = len(mat_list)
+
+        for depth in range(ctrl_size):
+            down(depth)
+
+        for pos in range(0, -(-branch_amount // 2) - 1):
+            leaf(2 * pos)
+
+            diff_depth = bitwise_count_diff(pos, pos + 1)
+            for j in range(0, diff_depth - 1):
+                up(ctrl_size - j - 1)
+            bounce(ctrl_size - diff_depth)
+            for j in range(0, diff_depth - 1):
+                down(ctrl_size - (diff_depth - 1) + j)
+
+        if branch_amount % 2 == 0:
+            leaf(branch_amount - 2)
+        else:
+            last_leaf(branch_amount - 1)
+
+        diff = 2**ctrl_size - branch_amount
+        for j in range(ctrl_size):
+            depth = ctrl_size - j - 1
+            up(depth)
+            if (diff >> j) & 1:
+                if depth == 0:
+                    qc.x(anc_qubit(depth))
+                else:
+                    append_cx(anc_qubit(depth - 1), anc_qubit(depth))
+
+        tcount = 4 * mccount
+        return qc, tcount, mccount, cxcount
     
 
     def find_optimal_order_matrices(self):
@@ -1205,6 +1360,9 @@ class BlockEncoding:
         elif opt == 'Ctrl-line':
             qc_u, tcount, mccount, cxcount = self.mulplex_U_opt(self.mat_list, self.ctrl_size, self.sys_size, gateable=gateable)
             return qc_u
+        elif opt == 'Tree':
+            qc_u, tcount, mccount, cxcount = self.mulplex_U_tree(self.mat_list, self.ctrl_size, self.sys_size)
+            return qc_u
         elif opt == 'Matrix-order':
             qc_u, tcount, mccount, cxcount, ctrl_size = self.mulplex_U_opt_order()
             return qc_u
@@ -1244,6 +1402,20 @@ class BlockEncoding:
             qc.compose(qc_select, qubits = ctrl_index, inplace = True) #type: ignore
             qc.compose(qc_u, qubits = qc.qubits, inplace = True)
             qc.compose(qc_select.inverse(), qubits = ctrl_index, inplace = True) #type: ignore
+        elif opt == 'Tree':
+            qc_u, tcount, mccount, cxcount = self.mulplex_U_tree(
+                self.mat_list,
+                self.ctrl_size,
+                self.sys_size,
+            )
+            ctrl = QuantumRegister(self.ctrl_size, 'ctrl')
+            anc = QuantumRegister(self.ctrl_size, 'tree_anc')
+            sys = QuantumRegister(self.sys_size, 'sys')
+            qc = QuantumCircuit(ctrl, anc, sys, name='BlockEncoding')
+            qc_select = self.mulplex_B(self.coeff_list, self.ctrl_size)
+            qc.compose(qc_select, qubits=ctrl, inplace=True)  # type: ignore
+            qc.compose(qc_u, qubits=list(ctrl) + list(anc) + list(sys), inplace=True)
+            qc.compose(qc_select.inverse(), qubits=ctrl, inplace=True)  # type: ignore
         elif opt == 'Matrix-order':
             # coeff_mode_dict, ctrl_size = self.find_optimal_order_matrices()
             qc_u, tcount, mccount, cxcount, ctrl_size = self.mulplex_U_opt_order()
@@ -1302,7 +1474,7 @@ class AlgCircuitSimulator:
 
 class AlgCircuitSVSimulator(AlgCircuitSimulator):
     def transpile_circuit(self, gate_class: list[str] | None = None, optimization_level: int = 1):
-        backend = AerSimulator(method="statevector")
+        backend = _require_aer_simulator()(method="statevector")
         self.transpiled_circuit = transpile(
             self.circuit,
             backend=backend,
@@ -1320,7 +1492,7 @@ class AlgCircuitSVSimulator(AlgCircuitSimulator):
         qc_sim = QuantumCircuit(qc.qubits, qc.clbits)
         qc_sim.initialize(initial_state, range(len(initial_state)))  # type: ignore
         qc_sim.compose(qc, qc.qubits, qc.clbits, inplace=True)
-        simulator = AerSimulator(method="statevector")
+        simulator = _require_aer_simulator()(method="statevector")
 
         self.result_sv = simulator.run(qc_sim, shots = 1).result().data['final_state']
 
@@ -1342,7 +1514,7 @@ class AlgCircuitSVSimulator(AlgCircuitSimulator):
         
 class AlgCircuitTNSimulator(AlgCircuitSimulator):
     def transpile_circuit(self, gate_class: list[str] | None = None, optimization_level: int = 1):
-        backend = AerSimulator(method="matrix_product_state")
+        backend = _require_aer_simulator()(method="matrix_product_state")
         self.transpiled_circuit = transpile(
             self.circuit,
             backend=backend,
@@ -1354,7 +1526,7 @@ class AlgCircuitTNSimulator(AlgCircuitSimulator):
 
     def simulate(self, initial_state: Statevector | None = None, bond_dim: int = 64):
         qc = self.transpiled_circuit or self.circuit
-        simulator = AerSimulator(method="matrix_product_state")
+        simulator = _require_aer_simulator()(method="matrix_product_state")
         simulator.set_options(matrix_product_state_max_bond_dimension=bond_dim)
         qc_sim = QuantumCircuit(qc.qubits, qc.clbits)
         if initial_state is not None:

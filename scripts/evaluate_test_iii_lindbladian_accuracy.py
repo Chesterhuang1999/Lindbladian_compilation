@@ -26,6 +26,12 @@ from qiskit.quantum_info import DensityMatrix, Statevector
 from qutip import basis, tensor
 
 
+AXIS_LABEL_FONT_SIZE = 17
+TICK_LABEL_FONT_SIZE = 12
+LEGEND_FONT_SIZE = 13
+TITLE_FONT_SIZE = 20
+
+
 def simulate_case_lcu_vs_baseline(num_qubits, delta_t_values, gamma):
     h_terms, l_terms = build_periodic_tfim_lindbladian_pauli(num_qubits, gamma)
     tfim_lind = Lindbladian(h_terms, l_terms)
@@ -131,10 +137,11 @@ def plot_error_rates(n_list, delta_t_rec, error_rate, pauli_bound):
         )
     plt.xscale("log")
     plt.yscale("log")
-    plt.xlabel(r"$1/\Delta t$", fontsize=15)
-    plt.ylabel("Error Rate", fontsize=15)
-    plt.title("Error Rate vs. Evolution time for Different Qubit Numbers", fontsize=18)
-    plt.legend()
+    plt.xlabel(r"$1/\Delta t$", fontsize=AXIS_LABEL_FONT_SIZE)
+    plt.ylabel("Error Rate", fontsize=AXIS_LABEL_FONT_SIZE)
+    plt.title("Error Rate vs Single-segment Evolution Duration", fontsize=TITLE_FONT_SIZE)
+    plt.tick_params(axis="both", which="major", labelsize=TICK_LABEL_FONT_SIZE)
+    plt.legend(fontsize=LEGEND_FONT_SIZE)
     plt.grid(True, which="both", ls="--", alpha=0.5)
 
     out_dir = RESULTS_DIR / "accuracy_cLCU"

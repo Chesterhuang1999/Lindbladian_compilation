@@ -1,0 +1,27 @@
+{
+  "mode": "compare",
+  "output": "validation/strong_baseline_hrw2",
+  "family": "hrw",
+  "n": 2,
+  "dt": 0.01,
+  "input_seed": 0,
+  "wall": 180.0,
+  "cpu": 120.0,
+  "lowerings": 2,
+  "per_call": 60.0,
+  "candidates": 1,
+  "rounds": 2,
+  "rewrite_beam": 2,
+  "placement_beam": null,
+  "repeats": 1,
+  "profile": "fast",
+  "profiles": [
+    "fast",
+    "default"
+  ],
+  "methods": [
+    "proxy_layered"
+  ],
+  "no_feedback": false,
+  "no_adaptive": false
+}

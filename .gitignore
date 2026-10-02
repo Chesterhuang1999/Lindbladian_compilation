@@ -14,3 +14,7 @@
 /Docs/
 /Baseline_scripts/archive_scripts/
 /codex_results
+/archive_scripts/
+/tmp/
+/.cache/
+.DS_Store

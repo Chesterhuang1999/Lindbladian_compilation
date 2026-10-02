@@ -1,0 +1,242 @@
+{
+  "review_date": "2026-09-14",
+  "status": "static_review_no_benchmarks_executed",
+  "base_git_head": "fa39aeaf1158b61bfa084d223b0e545bb805be1a",
+  "working_tree_clean": false,
+  "not_a_complete_runtime_source_snapshot": true,
+  "checks": {
+    "counts": {
+      "dev": 8,
+      "test": 12,
+      "ood": 3
+    },
+    "methods": 8,
+    "formal_runs_all_tracks_all_tiers": 3600,
+    "end_to_end_search_budget_hours": 75,
+    "tool_cpu_budget_hours": 26.666666666666668,
+    "agent_runs": 450,
+    "plan_characters": 21348
+  },
+  "anchors": [
+    {
+      "path": "src/channel_IR.py",
+      "symbol": "channel",
+      "line": 425
+    },
+    {
+      "path": "src/channel_IR.py",
+      "symbol": "Matrixsum",
+      "line": 80
+    },
+    {
+      "path": "src/channel_IR.py",
+      "symbol": "PauliAtom",
+      "line": 30
+    },
+    {
+      "path": "src/channelIR_gatecost_rewrite_search.py",
+      "symbol": "gatecost_rewrite_search",
+      "line": 258
+    },
+    {
+      "path": "src/placement_search.py",
+      "symbol": "search_for_pauli_placement",
+      "line": 1258
+    },
+    {
+      "path": "src/placement_search.py",
+      "symbol": "analyze_placement_structure",
+      "line": 522
+    },
+    {
+      "path": "scripts/run_tfim4_channel_lcu_ours_nam.py",
+      "symbol": "build_periodic_tfim_channel",
+      "line": 40
+    },
+    {
+      "path": "scripts/run_hypercube_n4_ours_nam.py",
+      "symbol": "build_hypercube_channel",
+      "line": 47
+    },
+    {
+      "path": "scripts/build_random_channel_lcu_benchmark.py",
+      "symbol": "RandomChannelSpec",
+      "line": 66
+    },
+    {
+      "path": "scripts/build_random_channel_lcu_benchmark.py",
+      "symbol": "RandomChannelCase",
+      "line": 88
+    },
+    {
+      "path": "scripts/build_random_channel_lcu_benchmark.py",
+      "symbol": "build_random_kraus_ops",
+      "line": 129
+    },
+    {
+      "path": "scripts/build_repetition_code_dqe_channel.py",
+      "symbol": "DqeSpec",
+      "line": 55
+    },
+    {
+      "path": "scripts/build_repetition_code_dqe_channel.py",
+      "symbol": "build_repetition_dqe_channel",
+      "line": 188
+    },
+    {
+      "path": "scripts/build_repetition_code_dqe_channel.py",
+      "symbol": "pauli_dict_to_matrixsum",
+      "line": 222
+    },
+    {
+      "path": "scripts/build_graph_cluster_state_channel_lcu.py",
+      "symbol": "grid_2d_cluster_graph",
+      "line": 78
+    },
+    {
+      "path": "scripts/build_graph_cluster_state_channel_lcu.py",
+      "symbol": "random_bounded_degree_graph",
+      "line": 95
+    },
+    {
+      "path": "scripts/build_graph_cluster_state_channel_lcu.py",
+      "symbol": "build_channel_for_spec",
+      "line": 259
+    }
+  ],
+  "files": [
+    {
+      "path": "/Users/chester_hqf/Desktop/Research/2025/Lindbladian/Lindbladian_compilation/src/channel_IR.py",
+      "size_bytes": 52229,
+      "sha256": "5009e6f7c62ac13e3a7cda93f4708791d97a0b28ab0801d3bacc2d05083a9d67"
+    },
+    {
+      "path": "/Users/chester_hqf/Desktop/Research/2025/Lindbladian/Lindbladian_compilation/src/channelIR_gatecost_rewrite_search.py",
+      "size_bytes": 15534,
+      "sha256": "ec29e3ca3ab59e521d59a14f6f3812bcbb1cacee374b14ede4ee901aaaafc7ee"
+    },
+    {
+      "path": "/Users/chester_hqf/Desktop/Research/2025/Lindbladian/Lindbladian_compilation/src/placement_search.py",
+      "size_bytes": 66684,
+      "sha256": "257e2d6626822642265449a052de63dc5b66d457ae339e3714fe814b173e2007"
+    },
+    {
+      "path": "/Users/chester_hqf/Desktop/Research/2025/Lindbladian/Lindbladian_compilation/scripts/run_tfim4_channel_lcu_ours_nam.py",
+      "size_bytes": 13084,
+      "sha256": "25676cd7fe5d2348c6f7a25189f048823aa8f4563c3514975d176594798f9ebd"
+    },
+    {
+      "path": "/Users/chester_hqf/Desktop/Research/2025/Lindbladian/Lindbladian_compilation/scripts/run_hypercube_n4_ours_nam.py",
+      "size_bytes": 14884,
+      "sha256": "0bd2ebd9252322e46b6df81b32fd638107163798823bb0a44d05d4a80cc16603"
+    },
+    {
+      "path": "/Users/chester_hqf/Desktop/Research/2025/Lindbladian/Lindbladian_compilation/scripts/build_random_channel_lcu_benchmark.py",
+      "size_bytes": 42826,
+      "sha256": "7d2978cd4157165335a2b9d67e49fccf1dfbb8a32600011719c89727308889cf"
+    },
+    {
+      "path": "/Users/chester_hqf/Desktop/Research/2025/Lindbladian/Lindbladian_compilation/scripts/build_repetition_code_dqe_channel.py",
+      "size_bytes": 12128,
+      "sha256": "e6f53a802100c72e2a28ed9fabf396affde1954f524cd287473f12f7a14098fa"
+    },
+    {
+      "path": "/Users/chester_hqf/Desktop/Research/2025/Lindbladian/Lindbladian_compilation/scripts/build_graph_cluster_state_channel_lcu.py",
+      "size_bytes": 16353,
+      "sha256": "c19d9e53a291bdf8715f3796106122c96be8a2db2c52fd9f7503b9fc27951a4a"
+    },
+    {
+      "path": "/Users/chester_hqf/Desktop/Research/2025/Lindbladian/Lindbladian_compilation/src/block_encoding.py",
+      "size_bytes": 65846,
+      "sha256": "f9fa63dd24a16f4600582b112195e97b6e42f5f57f8cd261febfdd1e8eac9abd"
+    },
+    {
+      "path": "/Users/chester_hqf/Desktop/Research/2025/Lindbladian/Lindbladian_compilation/src/block_encoding_new.py",
+      "size_bytes": 70372,
+      "sha256": "b407d609f938047e3a0f51a21c84cad46b084329a4207d82b2c2757a43de8fda"
+    },
+    {
+      "path": "/Users/chester_hqf/Desktop/Research/2025/Lindbladian/Lindbladian_compilation/src/block_encoding_new_fixed.py",
+      "size_bytes": 70160,
+      "sha256": "49f6c48c649ba4208cbce73ada5dbc32fb67c623ee3211daf5d7b589ef6b9278"
+    },
+    {
+      "path": "/Users/chester_hqf/Desktop/Research/2025/Lindbladian/Lindbladian_compilation/src/mobius_residual_fixed.py",
+      "size_bytes": 5286,
+      "sha256": "01c8d6e5214db84e1e862f82072fc8204b053683fba4fb21a1756a2e518b9aa2"
+    },
+    {
+      "path": "/Users/chester_hqf/Desktop/Research/2025/Lindbladian/Lindbladian_compilation/src/channel_LCU.py",
+      "size_bytes": 25023,
+      "sha256": "aa9fcd35da9e9dce365baaba689399e5b877dcee755849bdb11595a029e1970a"
+    },
+    {
+      "path": "/Users/chester_hqf/Desktop/Research/2025/Lindbladian/Lindbladian_compilation/src/subroutine.py",
+      "size_bytes": 22001,
+      "sha256": "34681d135a29647508dfcf74f930bb7d1150e1e1c120856363965d7f1ecfd544"
+    },
+    {
+      "path": "/Users/chester_hqf/Desktop/Research/2025/Lindbladian/Lindbladian_compilation/Baseline_scripts/baseline_common.py",
+      "size_bytes": 16464,
+      "sha256": "d893a7ba14816b168a065e02701c5bfad056da715900b65dfde4a1d44c69fd06"
+    },
+    {
+      "path": "/Users/chester_hqf/Desktop/Research/2025/Lindbladian/Lindbladian_compilation/scripts/run_random_coloring_channel_lcu_ours_nam.py",
+      "size_bytes": 55388,
+      "sha256": "f9596599b3bc88f8eb2dcba7f014417ebbf026ab1c4407003b6bff742d39d727"
+    },
+    {
+      "path": "/Users/chester_hqf/Desktop/Research/2025/Lindbladian/Lindbladian_compilation/scripts/test_isometry_row_increase_channel_lcu_nam.py",
+      "size_bytes": 9495,
+      "sha256": "e8a9fb09ea50f417c9fe2f7a727e067dbf2cea5a5c80ead4eab9c9455c12d13d"
+    },
+    {
+      "path": "/Users/chester_hqf/Desktop/Research/2025/Lindbladian/Lindbladian_compilation/experiments/tfim_tud/README.md",
+      "size_bytes": 3775,
+      "sha256": "3fbb9cf33a3c4d960280ca2e4f15630f9fdc8aecbad7c6de4e5ffafaf2d3faaf"
+    },
+    {
+      "path": "/Users/chester_hqf/Desktop/Research/2025/Lindbladian/Lindbladian_compilation/experiments/tfim_tud/remote_channel_adapter.py",
+      "size_bytes": 7400,
+      "sha256": "e4a88bb035ac27f6f7279e128ecaf307937fde2a7acece75d01ea8627db3ca90"
+    },
+    {
+      "path": "/Users/chester_hqf/Desktop/Research/2025/Lindbladian/Lindbladian_compilation/experiments/tfim_tud/placement_scalable.json",
+      "size_bytes": 316,
+      "sha256": "3d41c1c7e99596c2447e6827b32bdb09eb2a19d3e3c72450ff1320cc03f7bd40"
+    },
+    {
+      "path": "/Users/chester_hqf/Desktop/Research/2025/Lindbladian/Lindbladian_compilation/Results/channel_lcu_structure_opt_refresh_main.md",
+      "size_bytes": 5911,
+      "sha256": "b40f2eb212e37c399dd24c5aa2523bba73ef601b4c6506d6a2b4c7aff5164651"
+    },
+    {
+      "path": "/Users/chester_hqf/Desktop/Research/2025/Lindbladian/Lindbladian_compilation/Results/channel_lcu_appendix_compile_times.md",
+      "size_bytes": 2504,
+      "sha256": "98b855f4c406d8805e90c7cb4479c7406e2f8c448c4fb6369eb4da81bd73f912"
+    },
+    {
+      "path": "/Users/chester_hqf/Desktop/Research/2025/Lindbladian/AGENTS.md",
+      "size_bytes": 12750,
+      "sha256": "fdd8b8292015ac94a2f557ee654eec0e01ca46f7ed030df53809b13e34f0b906"
+    },
+    {
+      "path": "/Users/chester_hqf/Desktop/Research/2025/Lindbladian/nonudymics/main_v2.pdf",
+      "size_bytes": 1148937,
+      "sha256": "050271a91c12e872eea524cfa12b633f158c0ef918d9afb20f970fd461645d1f"
+    },
+    {
+      "path": "/Users/chester_hqf/Downloads/GOAL_ChannelIR_Joint_Search_Pilot.md",
+      "size_bytes": 3208,
+      "sha256": "6416ef542774aa9665cf9968b1a1c96d6883b7bffa0ce16f1b12569294d0df62"
+    }
+  ],
+  "document_verification": {
+    "json_valid": true,
+    "markdown_fences_balanced": true,
+    "verified_source_hashes_unchanged": 25,
+    "instance_and_budget_checks": "passed",
+    "runner_status": "not_implemented_as_documented",
+    "plan_characters": 21348
+  }
+}

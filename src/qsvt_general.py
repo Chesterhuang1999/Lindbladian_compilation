@@ -58,14 +58,19 @@ def _validate_degree(degree: int, parity: int, name: str) -> None:
 
 
 def _phase_adjustment(phi_values: np.ndarray, parity: int) -> np.ndarray:
-    """Match the phase convention used by ``Hamiltonian.qsvt_Hamiltonian``."""
+    """Convert sym_qsp's imaginary Wx polynomial to real QSVT extraction.
+
+    For R(phi)=exp(i phi Z), W(x)=i R(-pi/4) U(x) R(-pi/4).
+    The degree-d conversion contributes i**(-d); one endpoint shift makes
+    the total factor -i, so the extracted real part is Im(P_W)=P_target.
+    """
     phi = np.array(phi_values, dtype=float, copy=True)
-    phi[0] -= np.pi / 4
-    if parity == 0:
-        phi[1:-1] += np.pi / 2
-    else:
-        phi[1:] += np.pi / 2
-    phi[-1] += 3 * np.pi / 4
+    degree = len(phi) - 1
+    if degree % 2 != parity:
+        raise ValueError("QSP phase count does not match the polynomial parity.")
+    phi[0] += (degree - 1) * np.pi / 2 - np.pi / 4
+    phi[1:-1] -= np.pi / 2
+    phi[-1] -= np.pi / 4
     return phi
 
 
@@ -290,7 +295,7 @@ def qsvt_hamiltonian_via_even_odd(
     opt: str = "No",
     **kwargs,
 ) -> tuple[QuantumCircuit, QuantumCircuit, dict]:
-    """Reproduce ``qsvt_Hamiltonian`` through the generic even/odd interface."""
+    """Approximate exp(-i J t) through the generic even/odd interface."""
     alpha = float(sum(abs(coeff) for _, coeff in J.instances))
     return qsvt_even_odd_function(
         J,
