@@ -1,8 +1,0 @@
-#!/bin/sh
-set -eu
-PROJECT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
-export PATH="$PROJECT_DIR/.toolchain/lean-4.34.1-darwin_aarch64/bin:$PATH"
-export MATHLIB_CACHE_DIR="$PROJECT_DIR/.cache/mathlib"
-export LAKE_CACHE_DIR="$PROJECT_DIR/.cache/lake"
-cd "$PROJECT_DIR"
-exec lake "$@"

@@ -1,9 +1,9 @@
-# Track compiler sources, formalization, and reproduction code; keep results locally.
+# Track compiler sources and reproduction code; keep results and formalization locally.
 /*
 !/.gitignore
 !/paper_experiments/
 !/src/
-!/Lean_formalization/
+/Lean_formalization/
 
 # Experiments: source code and required reproduction inputs only.
 /paper_experiments/**
@@ -182,7 +182,6 @@
 **/*.qasm3
 **/*.qpy
 /src/**/*.ipynb
-/Lean_formalization/Lean_formalization-src.tar.gz
 
 # Caches and environments.
 **/__pycache__/
@@ -197,4 +196,3 @@
 **/.runtime/
 **/site-packages/
 **/node_modules/
-/Lean_formalization/.lake/
