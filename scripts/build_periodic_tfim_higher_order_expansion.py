@@ -34,14 +34,14 @@ if str(BASELINE_DIR) not in sys.path:
     sys.path.insert(0, str(BASELINE_DIR))
 
 from baseline_common import count_qasm_file  # type: ignore  # noqa: E402
-from block_encoding_new import BlockEncoding as NewBlockEncoding  # type: ignore  # noqa: E402
+from block_encoding import BlockEncoding as NewBlockEncoding  # type: ignore  # noqa: E402
 from channel_IR import Lindbladian, Matrixsum, matsum_mul  # type: ignore  # noqa: E402
 from qasm_export import export_openqasm2_quartz_input  # type: ignore  # noqa: E402
 from series_expansion import (  # type: ignore  # noqa: E402
     create_index_set,
     quadrature_points_N_weights,
 )
-from subroutine import mulplex_U_opt  # type: ignore  # noqa: E402
+from subroutine import mulplex_U_opt, mulplex_U_tree  # type: ignore  # noqa: E402
 
 
 NAM_BASIS = ("h", "x", "rz", "cx")
@@ -188,6 +188,10 @@ def construct_higher_order_circuit_dynamic(
     jump_opt: str,
     structure: str,
 ) -> tuple[QuantumCircuit, list[int], float, np.ndarray, dict[str, Any]]:
+    # Keep the historical alias, but make new outer structure choices explicit.
+    structure = "opt" if structure == "optimized" else structure
+    if structure not in ("basic", "opt", "tree"):
+        raise ValueError(f"Unsupported outer structure: {structure}")
     effective_generator = lind.effective_H()
     sys_size = effective_generator.size
     num_jumps = len(lind.L_list)
@@ -248,20 +252,22 @@ def construct_higher_order_circuit_dynamic(
             controlled = subcircuit.to_gate().control(num_ctrl_qubits=sel_size, ctrl_state=ctrl_state)
             qc.append(controlled, qargs=list(select) + list(ctrl[:ctrl_size]) + list(sys))
         reg_sizes = [sel_size, ctrl_size_max, sys_size]
-    elif structure == "optimized":
+    elif structure in ("opt", "tree"):
         qc = QuantumCircuit(2 * sel_size + ctrl_size_max + sys_size)
-        qc, _tcount, _mccount, _cxcount = mulplex_U_opt(
-            qc,
-            circuits,
-            sel_size,
-            ctrl_size_max,
-            sys_size,
-        )
+        outer_select = mulplex_U_opt if structure == "opt" else mulplex_U_tree
+        if sel_size == 0:
+            qc.compose(circuits[0], inplace=True)
+        else:
+            qc, _tcount, _mccount, _cxcount = outer_select(
+                qc, circuits, sel_size, ctrl_size_max, sys_size,
+            )
         reg_sizes = [sel_size, sel_size, ctrl_size_max, sys_size]
     else:
         raise ValueError(f"Unsupported structure: {structure}")
 
     metadata = {
+        "structure": structure,
+        "outer_select": {"basic": "basic", "opt": "ctrl-line", "tree": "tree"}[structure],
         "order_counts": order_counts,
         "ctrl_sizes": ctrl_sizes,
         "ctrl_size_max": ctrl_size_max,
@@ -279,6 +285,7 @@ def add_selection_state_preparation(
     *,
     structure: str,
 ) -> tuple[QuantumCircuit, list[list[int]]]:
+    structure = "opt" if structure == "optimized" else structure
     if structure == "basic":
         sel_size, ctrl_size, sys_size = reg_sizes
         qc = QuantumCircuit(sel_size + ctrl_size + sys_size)
@@ -289,7 +296,7 @@ def add_selection_state_preparation(
         qc.compose(select_qc, qubits=qc.qubits, inplace=True)
         return qc, [select_indexes, ctrl_indexes, sys_indexes]
 
-    if structure == "optimized":
+    if structure in ("opt", "tree"):
         sel_size, anc_size, ctrl_size, sys_size = reg_sizes
         qc = QuantumCircuit(2 * sel_size + ctrl_size + sys_size)
         select_indexes = [2 * j for j in range(sel_size)]
@@ -390,7 +397,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--coherent-order", type=int, default=4)
     parser.add_argument("--coherent-opt", choices=("No", "Matrix-order"), default="No")
     parser.add_argument("--jump-opt", choices=("No", "Matrix-order"), default="No")
-    parser.add_argument("--structure", choices=("basic", "optimized"), default="basic")
+    parser.add_argument(
+        "--structure", choices=("basic", "opt", "tree", "optimized"), default="basic",
+        help="Outer SELECT: basic, opt (ctrl-line), tree; optimized is a legacy alias for opt.",
+    )
     parser.add_argument("--out-root", type=Path, default=DEFAULT_OUT_ROOT)
     parser.add_argument("--summary-root", type=Path, default=DEFAULT_SUMMARY_ROOT)
     parser.add_argument("--nam-optimization-level", type=int, default=0)

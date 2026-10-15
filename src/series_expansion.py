@@ -179,7 +179,13 @@ def higher_order_Lind_expansion(Lind: Lindbladian, K: int, q: int, t: float, K1:
     return qc_info, sel_state, reg_sizes, qc_coh_ctrl_size, qc_ensemble, kraus_count, ctrl_sizes, coeff_sum_square
 
 def construct_higher_order_circuit(Lind, K, q, t, K1, opt = 'No', structure = 'basic'):
+    """Build with outer basic/opt (ctrl-line)/tree; opt controls inner blocks.
 
+    The historical spelling 'optimized' remains an alias for outer 'opt'.
+    """
+    structure = 'opt' if structure == 'optimized' else structure
+    if structure not in ('basic', 'opt', 'tree'):
+        raise ValueError(f"Unsupported outer structure: {structure}")
     qc_info, sel_state, reg_sizes, qc_coh_ctrl_size, qc_ensemble, kraus_count, ctrl_sizes, coeff_sum_square = higher_order_Lind_expansion(Lind, K, q, t, K1, opt = opt)
     sel_size, ctrl_size_max, sys_size = reg_sizes
     
@@ -205,11 +211,21 @@ def construct_higher_order_circuit(Lind, K, q, t, K1, opt = 'No', structure = 'b
             qc_main.append(qc_elem_control, qargs = qc_main.qubits[:sel_size] + qc_main.qubits[sel_size: sel_size + ctrl_size]
                             + qc_main.qubits[sel_size + ctrl_size_max:])
     # print("All Kraus operators constructed")
-    elif structure == 'optimized':
+    elif structure in ('opt', 'tree'):
         circuits = [qc_info[0]] + qc_ensemble
         qc_main = QuantumCircuit(2 * sel_size + ctrl_size_max + sys_size)
-        qc_main, _, _, _ = mulplex_U_opt(qc_main, circuits, sel_size, ctrl_size_max, sys_size)
+        outer_select = mulplex_U_opt if structure == 'opt' else mulplex_U_tree
+        if sel_size == 0:
+            qc_main.compose(circuits[0], inplace=True)
+        else:
+            qc_main, _, _, _ = outer_select(qc_main, circuits, sel_size, ctrl_size_max, sys_size)
         reg_sizes = [sel_size, sel_size, ctrl_size_max, sys_size]
+    qc_main.metadata = {
+        **(qc_main.metadata or {}),
+        'structure': structure,
+        'outer_select': {'basic': 'basic', 'opt': 'ctrl-line', 'tree': 'tree'}[structure],
+        'block_opt': opt,
+    }
     return qc_main, reg_sizes, coeff_sum_square, sel_state
     # return qc_main, reg_sizes, coeff_sum_square
 
@@ -702,4 +718,3 @@ if __name__ == "__main__":
     diff = final_dm_sys - final_dens
     err = np.linalg.norm(diff, ord = 'nuc') / 2
     print(f"Simulate error: {err}")
-        

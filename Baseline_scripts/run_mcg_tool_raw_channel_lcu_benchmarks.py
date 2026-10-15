@@ -237,38 +237,20 @@ def rewrite_channel(kraus_ops: list[Any], *, max_steps: int = 50) -> tuple[list[
 
 
 def build_ours_channel_lcu(kraus_ops: list[Any]) -> tuple[Any, Any, float]:
-    import numpy as np
-    from qiskit import QuantumCircuit
-    from block_encoding_new import BlockEncoding as NewBlockEncoding  # type: ignore
-    import channel_LCU  # type: ignore
+    """Use the shared corrected backend and explicit tree outer selection."""
+    from channel_IR import channel_ensemble
+    import channel_LCU
 
     started = time.perf_counter()
-    sys_size = max(ms.size for ms in kraus_ops)
-    select_size = int(np.ceil(np.log2(len(kraus_ops))))
-    coeff_sums = [ms.pauli_norm() for ms in kraus_ops]
-    lcu_ini = channel_LCU.prep_sup_state(coeff_sums)
-    circuits = [NewBlockEncoding(copy.deepcopy(ms)).circuit(opt="Matrix-order") for ms in kraus_ops]
-    ctrl_size = max(circ.num_qubits - sys_size for circ in circuits)
-
-    qc = QuantumCircuit(2 * select_size + ctrl_size + sys_size)
-    select_indexes = [2 * j for j in range(select_size)]
-    anc_indexes = [2 * j + 1 for j in range(select_size)]
-    ctrl_indexes = list(range(2 * select_size, 2 * select_size + ctrl_size))
-    sys_indexes = list(range(2 * select_size + ctrl_size, 2 * select_size + ctrl_size + sys_size))
-    qc.compose(lcu_ini, qubits=select_indexes, inplace=True)
-    qc, _tcount, _mccount, _cxcount = channel_LCU.mulplex_U_opt(
-        qc,
-        circuits,
-        select_size,
-        ctrl_size,
-        sys_size,
+    qc, qubit_indexes = channel_LCU.channel_to_LCU(
+        channel_ensemble([copy.deepcopy(kraus_ops)]), structure="tree", opt="Matrix-order",
     )
-    return qc, [select_indexes, anc_indexes, ctrl_indexes, sys_indexes], time.perf_counter() - started
+    return qc, qubit_indexes, time.perf_counter() - started
 
 
 def run_ours_workflow(kraus_ops: list[Any], bench_dir: Path) -> dict[str, Any]:
     result: dict[str, Any] = {
-        "method": "rewrite_search + structure=opt + Matrix-order",
+        "method": "rewrite_search + structure=tree + Matrix-order",
         "used_project_optimizer": True,
         "status": "running",
     }
@@ -1000,7 +982,7 @@ def build_comparison_rows(benchmark: str, basis: str, bench_summary: dict[str, A
         ),
         (
             "ours",
-            "Ours rewrite+opt+Matrix-order + Qiskit opt0",
+            "Ours rewrite+tree+Matrix-order + Qiskit opt0",
             extract_stats(bench_summary.get("ours", {}).get("basis_recounts", {}).get(basis)),
             bench_summary.get("ours", {}).get("compile_time_s"),
             bench_summary.get("ours", {}).get("status"),
@@ -1353,7 +1335,7 @@ def write_report(summary: dict[str, Any], path: Path) -> None:
         "- External tools are tested only on raw `channel_to_LCU(..., structure=\"basic\", opt=\"No\")` circuits.",
         "- No project SELECT/address-placement/factorization optimization is used before external tools.",
         "- Tools without a direct Qiskit `QuantumCircuit`/QASM import or built-in direct conversion path are marked `unable_direct_support`.",
-        "- Ours is included only as the comparison workflow (`rewrite_search + structure=opt + Matrix-order`).",
+        "- Ours is included only as the comparison workflow (`rewrite_search + structure=tree + Matrix-order`).",
         "",
         "## Direct-Support Classification",
         "",

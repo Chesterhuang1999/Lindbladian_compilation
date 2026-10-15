@@ -1,0 +1,720 @@
+import numpy as np
+from qiskit import QuantumCircuit, QuantumRegister, transpile, ClassicalRegister
+from qiskit.quantum_info import Statevector, Operator, DensityMatrix, partial_trace
+from qiskit_aer import AerSimulator
+from qiskit_aer.library import save_statevector, save_density_matrix, set_density_matrix, SetDensityMatrix
+from qutip import Qobj, tensor, basis
+from channel_IR import *
+from subroutine import *
+from block_encoding import BlockEncoding
+from baseline import simulate_lindblad 
+from copy import deepcopy
+import time
+
+from scipy.linalg import expm
+import itertools
+
+#### Construct the Lindbladian evolution circuit via higher-order series expansion
+def create_single_kraus(
+        k: int, index: list, L_list: list, K1: int,
+        t: float, q: int, ctrl_size: int, sys_size:int, eff_H: Matrixsum,
+        opt = 'No'
+        ):
+    """ 
+    Create the LCU encoding circuit by 
+    Concatenating the block-encoding circuits for 
+    each coherent gadget e^{J delta_t} and decay term L_j. 
+    A_j = sqrt(w_(jk) * ... * w_(jk,...j1)) e^J(t - x_(jk))L_(lk)e^J(x_(jk)- x_(jk,j_(k-1)))..... L_(l1)e^J(x_(j_k, j_(k-1),...,j_1))
+
+    Parameters: 
+    k (int): expansion order
+    q (int): number of quadrature points
+    index (list): indexes of quadrature points and decay terms
+    L_list (list): list of decay terms
+    eff_H: effective Hamiltonian J
+    ctrl_size, sys_size: control and system register sizes
+    K1: truncation order for J's Taylor series
+    t: evolution time
+    Returns:
+    qc_elem: the cascaded block-encoding circuit for Kraus operator A_j
+    coeff_sum_index sum of coefficients in Kraus A_j
+
+    """
+    ## 'indexes of L_j and quadrature points j_k...j_1'
+    l_list = index[1: k + 1]
+    j_list = index[k + 1: 2 * k + 1]
+    coeff_sum_index = 1.0 ## Set coeff sum value
+
+    ## Generate quadrature points and weights according to a biased Legendre function
+    points, weights = quadrature_points_N_weights(k, q, t, j_list)
+    points.append(0) ## Add minimum point 0
+    weights_prod = np.prod(weights)
+
+    ## Mul coefficient 'sqrt(w_(jk) * ... * w_(jk,...j1))'
+    coeff_sum_index *= np.sqrt(weights_prod)
+    
+    ## Sum up the control register sizes
+    ctrl_reg_size = []
+    for j in range(k + 1):
+        ctrl_reg_size.append(ctrl_size)
+        L_j = L_list[l_list[k - j - 1]]
+        if j < k:
+            ctrl_size_lj = int(np.ceil(np.log2(L_j.length)))
+            ctrl_reg_size.append(ctrl_size_lj)
+    total_ctrl_size = sum(ctrl_reg_size)
+    total_ctrl_reg = QuantumRegister(total_ctrl_size, 'ctrl')
+    system_reg = QuantumRegister(sys_size, 'sys')
+    qc_elem = QuantumCircuit(total_ctrl_reg, system_reg)
+    ctrl_offset = 0
+
+    ## Concatenate the block-encoding circuits from back to forth
+    for j in range(k + 1):
+        ## calculate each time interval
+        if j == k:
+            delta_t = t - points[0]
+        else:
+            delta_t = points[k - j - 1] - points[k - j] 
+
+        ### Concatenate the block-encoding for coherent term e^{J delta_t} = sum_l=0^K1 (J^l t^l/(l!)) 
+        qc_C, coeff_C = construct_circuit_coherent(eff_H, K1, delta_t, opt = opt)
+        qc_elem.compose(qc_C, qubits = qc_elem.qubits[ctrl_offset: ctrl_offset + ctrl_reg_size[2 * j]] 
+                        + qc_elem.qubits[total_ctrl_size:], inplace = True)
+        ctrl_offset += ctrl_reg_size[2 * j]
+        coeff_sum_index *= coeff_C
+
+        ### Concatenate the block-encoding for incoherent term L_(l_(k-j))
+        if j < k:
+            L_j = L_list[l_list[k - j - 1]]
+            coeff_sum_index *= L_j.pauli_norm() ## sum of coefficients 
+            qc_L = BlockEncoding(L_j).circuit(opt= 'No')
+            qc_elem.compose(qc_L, qubits = qc_elem.qubits[ctrl_offset: ctrl_offset + ctrl_reg_size[2 * j + 1]] 
+                        + qc_elem.qubits[total_ctrl_size:], inplace = True)
+            ctrl_offset += ctrl_reg_size[2 * j + 1]
+
+    return qc_elem, coeff_sum_index, total_ctrl_size
+
+
+
+def construct_circuit_coherent(J: Matrixsum, K1: int, t: float, opt = 'No'):
+    # J.mul_coeffs(-1j)
+    
+    sum_of_J = J.identity(J.size)
+    for order in range(1, K1 + 1):
+        if order == 1: 
+            product_J = deepcopy(J)
+            product_J.mul_coeffs(t)
+            sum_of_J = sum_of_J.add(product_J)
+            
+        else: 
+            product_J = matsum_mul(product_J, J)
+            product_J.mul_coeffs(t / order)
+            sum_of_J = sum_of_J.add(product_J)
+        
+    # qc_J = block_encoding_matrixsum(sum_of_J)
+    
+    be_J = BlockEncoding(sum_of_J)
+    qc_J = be_J.circuit(opt = opt)
+
+    
+    succ_prob = sum_of_J.pauli_norm()
+    
+    return qc_J, succ_prob
+
+
+# def higher_order_Lind_expansion(Lind: Lindbladian, K: int, q: int, t: float, ini_state, K1: int):
+def higher_order_Lind_expansion(Lind: Lindbladian, K: int, q: int, t: float, K1: int, opt = 'No'):
+    """
+    Create the higher-order Lindblad evolution expansion circuit
+    using Kth order series expansion with q quadrature points.
+    """
+    ### Zeroth order term: e^Jt
+    ### Here we just compute H_eff, and J = -iH_eff is incorporated into LCU construction
+    effective_H = Lind.effective_H()
+    
+    m = len(Lind.L_list)
+    sys_size = effective_H.size
+    sum_of_kraus = 0
+    qc_ensemble = []
+    coeff_sum_total = []
+    ctrl_sizes = []
+    ctrl_size_max = 0
+    kraus_count = 1
+
+    ### Construct the circuit for A_0 = e^{Jt}
+    qc_info = construct_circuit_coherent(effective_H, K1, t, opt = opt)
+    qc_coh_ctrl_size = qc_info[0].num_qubits - sys_size
+    coeff_sum_total.append(qc_info[1])
+    ctrl_size_max = max(ctrl_size_max, qc_coh_ctrl_size)
+    
+    ## Prepare the component circuit for each Kraus operator 
+    for k in range(1, K + 1):
+        index_set_k = create_index_set(k, q, m)
+        sum_of_kraus += len(index_set_k)
+
+        ## Each Kraus operator is constructed from an index tuple
+        for index in index_set_k:
+            kraus_count += 1
+            assert index[0] == k and len(index) == 2 * k + 1
+            qc_elem, coeff_sum_index, elem_ctrl_size = create_single_kraus(k, index, Lind.L_list, K1, t, q,
+                                                    qc_coh_ctrl_size, sys_size, effective_H, opt = opt)
+            ctrl_size_max = max(elem_ctrl_size, ctrl_size_max)
+            qc_ensemble.append(qc_elem)
+            coeff_sum_total.append(coeff_sum_index)
+            ctrl_sizes.append(elem_ctrl_size)
+    # print(f"Total Kraus operators: {kraus_count}")
+
+    #Define the registers
+    sel_size = int(np.ceil(np.log2(kraus_count))) 
+    reg_sizes = [sel_size, ctrl_size_max, sys_size]
+ 
+    ## Prepare superposition over selection register
+    coeff_sum_square = sum([abs(c)**2 for c in coeff_sum_total])
+    norm_coeffs = [abs(c)**2 / coeff_sum_square for c in coeff_sum_total]
+    weights = np.zeros(2**sel_size, dtype = float)
+    sel_state = np.zeros(2**sel_size, dtype = float)
+    for i, nc in enumerate(norm_coeffs):
+        weights[i] = nc
+        sel_state[i] = np.sqrt(nc)
+    
+    return qc_info, sel_state, reg_sizes, qc_coh_ctrl_size, qc_ensemble, kraus_count, ctrl_sizes, coeff_sum_square
+
+def construct_higher_order_circuit(Lind, K, q, t, K1, opt = 'No', structure = 'basic'):
+    """Build with outer basic/opt (ctrl-line)/tree; opt controls inner blocks.
+
+    The historical spelling 'optimized' remains an alias for outer 'opt'.
+    """
+    structure = 'opt' if structure == 'optimized' else structure
+    if structure not in ('basic', 'opt', 'tree'):
+        raise ValueError(f"Unsupported outer structure: {structure}")
+    qc_info, sel_state, reg_sizes, qc_coh_ctrl_size, qc_ensemble, kraus_count, ctrl_sizes, coeff_sum_square = higher_order_Lind_expansion(Lind, K, q, t, K1, opt = opt)
+    sel_size, ctrl_size_max, sys_size = reg_sizes
+    
+    select_reg = QuantumRegister(sel_size, 'sel')
+    control_reg = QuantumRegister(ctrl_size_max, 'ctrl')
+    system_reg = QuantumRegister(sys_size, 'sys')
+
+    qc_main = QuantumCircuit(select_reg, control_reg, system_reg)
+    
+    ### Append A_0 = e^{Jt} circuit
+    if structure == 'basic':
+        qc_coh_control = qc_info[0].to_gate().control(num_ctrl_qubits = sel_size, ctrl_state = '0' * sel_size)
+        qc_main.append(qc_coh_control, qargs = qc_main.qubits[:sel_size] + qc_main.qubits[sel_size:sel_size + qc_coh_ctrl_size] 
+                        + qc_main.qubits[sel_size + ctrl_size_max:])
+        # print("A_0 construct complete")
+
+        ### Append other Kraus operator circuit
+        for ind in range(1, kraus_count):
+            qc_elem = qc_ensemble[ind -1]
+            ctrl_size = ctrl_sizes[ind - 1]
+            select_value = bin(ind)[2:].zfill(sel_size)
+            qc_elem_control = qc_elem.to_gate().control(num_ctrl_qubits = sel_size, ctrl_state = select_value)
+            qc_main.append(qc_elem_control, qargs = qc_main.qubits[:sel_size] + qc_main.qubits[sel_size: sel_size + ctrl_size]
+                            + qc_main.qubits[sel_size + ctrl_size_max:])
+    # print("All Kraus operators constructed")
+    elif structure in ('opt', 'tree'):
+        circuits = [qc_info[0]] + qc_ensemble
+        qc_main = QuantumCircuit(2 * sel_size + ctrl_size_max + sys_size)
+        outer_select = mulplex_U_opt if structure == 'opt' else mulplex_U_tree
+        if sel_size == 0:
+            qc_main.compose(circuits[0], inplace=True)
+        else:
+            qc_main, _, _, _ = outer_select(qc_main, circuits, sel_size, ctrl_size_max, sys_size)
+        reg_sizes = [sel_size, sel_size, ctrl_size_max, sys_size]
+    qc_main.metadata = {
+        **(qc_main.metadata or {}),
+        'structure': structure,
+        'outer_select': {'basic': 'basic', 'opt': 'ctrl-line', 'tree': 'tree'}[structure],
+        'block_opt': opt,
+    }
+    return qc_main, reg_sizes, coeff_sum_square, sel_state
+    # return qc_main, reg_sizes, coeff_sum_square
+
+def zero_small_complex(arr, tol=1e-8):
+    """
+    If |Re| < tol, set Re = 0;
+    If |Im| < tol, set Im = 0.
+    """
+    arr = arr.copy()
+    re = arr.real
+    im = arr.imag
+
+    re[np.abs(re) < tol] = 0.0
+    im[np.abs(im) < tol] = 0.0
+
+    return re + 1j * im
+def normalize(vec):
+    norm = np.linalg.norm(vec)
+    if norm == 0:
+        return vec
+    return vec / norm
+def projection_op(op: Operator, dim: int, dim0: int):
+    proj_0 = Operator.from_label('0' * dim0)
+    iden = Operator.from_label('I' * (dim - dim0))
+
+    proj_full = iden.tensor(proj_0)
+
+    projected_op = np.dot(np.dot(proj_full, op), proj_full)
+    projected_op_reduced = np.zeros((2**(dim - dim0), 2**(dim - dim0)), dtype = complex)
+    for i in range(2**(dim - dim0)):
+        for j in range(2**(dim - dim0)):
+            projected_op_reduced[i, j] = projected_op[i * 2**dim0, j * 2**dim0]
+    return Operator(zero_small_complex(projected_op_reduced, tol = 1e-6))
+
+def projection_op_dm(dm: DensityMatrix, reg_sizes: list):
+    sel_size, ctrl_size, sys_size = reg_sizes
+    proj_0 = Operator.from_label('0' * ctrl_size)
+    iden_sel = Operator.from_label('I' * sel_size)
+    iden_sys = Operator.from_label('I' * sys_size)
+    proj_full = iden_sys.tensor(proj_0).tensor(iden_sel)
+    projected_dm = np.dot(np.dot(proj_full, dm), proj_full.adjoint())
+    
+    projected_dm_sys = partial_trace(DensityMatrix(projected_dm), list(range(sel_size + ctrl_size)))
+    return DensityMatrix(zero_small_complex(np.asarray(projected_dm_sys), tol = 1e-6))
+
+def projection_vec(sv: Statevector, dim: int, anc_size: int, ctrls: list, qubit_regs: list | None = None):
+    if qubit_regs is not None:
+        # Accept either explicit index layout
+        #   [select_idxs, ctrl_idxs, sys_idxs] or [select_idxs, anc_idxs, ctrl_idxs, sys_idxs]
+        # or size-only layout
+        #   [sel_size, ctrl_size, sys_size] or [sel_size, anc_size, ctrl_size, sys_size].
+        if all(isinstance(x, int) for x in qubit_regs):
+            if len(qubit_regs) == 3:
+                sel_size, ctrl_size, sys_size = qubit_regs
+                select_idxs = list(range(sel_size))
+                ctrl_idxs = list(range(sel_size, sel_size + ctrl_size))
+                sys_idxs = list(range(sel_size + ctrl_size, sel_size + ctrl_size + sys_size))
+                qubit_regs = [select_idxs, ctrl_idxs, sys_idxs]
+            elif len(qubit_regs) == 4:
+                sel_size, anc_size_local, ctrl_size, sys_size = qubit_regs
+                if anc_size_local != sel_size:
+                    raise ValueError("For optimized size-only layout, anc_size must equal sel_size.")
+                select_idxs = [2 * j for j in range(sel_size)]
+                anc_idxs = [2 * j + 1 for j in range(sel_size)]
+                ctrl_idxs = list(range(2 * sel_size, 2 * sel_size + ctrl_size))
+                sys_idxs = list(range(2 * sel_size + ctrl_size, 2 * sel_size + ctrl_size + sys_size))
+                qubit_regs = [select_idxs, anc_idxs, ctrl_idxs, sys_idxs]
+            else:
+                raise ValueError("Size-only qubit_regs must have length 3 or 4.")
+
+        data = np.asarray(sv.data if hasattr(sv, "data") else sv, dtype=complex).reshape(-1)
+
+        def place_bits(base_idx: int, local_idx: int, reg_qubits: list[int]) -> int:
+            out = base_idx
+            for bit_pos, qubit_id in enumerate(reg_qubits):
+                if ((local_idx >> bit_pos) & 1) == 1:
+                    out |= (1 << qubit_id)
+            return out
+
+        if len(qubit_regs) == 3:
+            select, ctrl, sys = qubit_regs
+            select_size, sys_size = len(select), len(sys)
+            dim_sys = 1 << sys_size
+            dim_sel = 1 << select_size
+
+            post_amp_sys_sel = np.zeros((dim_sys, dim_sel), dtype=complex)
+
+            # ctrl qubits are post-selected to |0...0|
+            for sys_idx in range(dim_sys):
+                for sel_idx in range(dim_sel):
+                    flat_idx = 0
+                    flat_idx = place_bits(flat_idx, sel_idx, select)
+                    flat_idx = place_bits(flat_idx, sys_idx, sys)
+                    post_amp_sys_sel[sys_idx, sel_idx] = data[flat_idx]
+
+            if select_size == 0:
+                out = post_amp_sys_sel[:, 0]
+                return Statevector(zero_small_complex(out, tol=1e-8))
+
+            rho_sys = np.einsum('as,bs->ab', post_amp_sys_sel, post_amp_sys_sel.conj())
+            return DensityMatrix(zero_small_complex(rho_sys, tol=1e-8))
+
+        if len(qubit_regs) == 4:
+            select, anc, ctrl, sys = qubit_regs
+            select_size, sys_size = len(select), len(sys)
+            dim_sys = 1 << sys_size
+            dim_sel = 1 << select_size
+
+            post_amp_sys_sel = np.zeros((dim_sys, dim_sel), dtype=complex)
+
+            # anc and ctrl qubits are post-selected to |0...0|
+            for sys_idx in range(dim_sys):
+                for sel_idx in range(dim_sel):
+                    flat_idx = 0
+                    flat_idx = place_bits(flat_idx, sel_idx, select)
+                    flat_idx = place_bits(flat_idx, sys_idx, sys)
+                    post_amp_sys_sel[sys_idx, sel_idx] = data[flat_idx]
+
+            rho_sys = np.einsum('as,bs->ab', post_amp_sys_sel, post_amp_sys_sel.conj())
+            return DensityMatrix(zero_small_complex(rho_sys, tol=1e-8))
+
+        raise ValueError("Unsupported qubit_regs layout, expected [select, ctrl, sys] or [select, anc, ctrl, sys].")
+
+    sel_size = anc_size - len(ctrls)
+    
+    # proj_0 = Operator.from_label('0' * len(ctrls))
+    # if sel_size == 0:
+    #     iden = Operator.from_label('I' * (dim - anc_size))
+    #     proj_full = iden.tensor(proj_0)
+    #     projected_vec = np.dot(proj_full, sv)
+    #     projected_vec = projected_vec[::2**anc_size]
+    #     return Statevector(zero_small_complex(projected_vec, tol = 1e-6))
+    # else:
+    #     iden_sel = Operator.from_label('I' * (sel_size))
+    #     iden_sys = Operator.from_label('I' * (dim - anc_size))
+    #     proj_full = iden_sys.tensor(proj_0).tensor(iden_sel) 
+    #     projected_vec = np.dot(proj_full, sv)
+    #     projected_dm_sys = partial_trace(DensityMatrix(projected_vec), list(range(anc_size)))
+    #     # projected_dm_sys = partial_trace(DensityMatrix(projected_vec), list(range(sel_size, anc_size)))
+    #     return DensityMatrix(zero_small_complex(np.asarray(projected_dm_sys), tol = 1e-6))
+    ctrl_size = len(ctrls)
+    sys_size = dim - anc_size
+
+    dim_sys = 1 << sys_size
+    dim_sel = 1 << sel_size
+
+    # state ordering consistent with existing construction:
+    # state_tot = state_sys_ctrl.tensor(state_sel)
+    # and state_sys_ctrl = state_sys.tensor(state_ctrl)
+    # => basis index: ((sys << ctrl_size) + ctrl) << sel_size + sel
+    data = np.asarray(sv.data if hasattr(sv, "data") else sv, dtype=complex).reshape(-1)
+
+    if sel_size == 0:
+        # keep only ctrl = 0...0 entries, output Statevector on system
+        out = np.zeros(dim_sys, dtype=complex)
+        for s in range(dim_sys):
+            flat_idx = s << ctrl_size  # ctrl bits fixed to 0
+            out[s] = data[flat_idx]
+        return Statevector(zero_small_complex(out, tol=1e-8))
+
+    # sel_size > 0:
+    # build amplitude matrix A[s, a] = <s, ctrl=0, a | psi>
+    A = np.zeros((dim_sys, dim_sel), dtype=complex)
+    shift = ctrl_size + sel_size
+    for s in range(dim_sys):
+        base = s << shift
+        # ctrl fixed to 0 => middle bits are 0, sel occupies lowest bits
+        A[s, :] = data[base: base + dim_sel]
+
+    # rho_sys[s, t] = sum_a A[s,a] * conj(A[t,a])  (trace out select)
+    rho_sys = np.einsum('sa,ta->st', A, np.conjugate(A))
+    return DensityMatrix(zero_small_complex(rho_sys, tol=1e-8))
+
+def simulate_circuit_statevec(qc: QuantumCircuit, ini_state, sel_state, reg_sizes: list):
+
+    simulator = AerSimulator(method = 'statevector')
+    
+    sel_size, ctrl_size, sys_size = reg_sizes
+    qc_sim = QuantumCircuit(qc.num_qubits)
+    state_ctrl = Statevector.from_label('0' * ctrl_size) if ctrl_size > 0 else Statevector([1.0])
+    if isinstance(ini_state, str):
+        state_sys_ctrl = Statevector.from_label(ini_state + '0' * ctrl_size)
+    elif isinstance(ini_state, Statevector):
+        state_sys_ctrl = ini_state.tensor(state_ctrl)
+        
+    state_tot = state_sys_ctrl.tensor(Statevector(sel_state))
+    
+    qc_sim.append(StatePreparation(state_tot), qc_sim.qubits)
+    
+    qc_sim.compose(qc, qc_sim.qubits, inplace=True)
+
+    qc_sim = transpile(qc_sim,  simulator, optimization_level=2)
+    print(qc_sim.count_ops())
+    qc_sim.save_statevector(label = 'final_state') #type: ignore
+    # qc_sim = transpile(qc_sim, simulator, optimization_level=2)
+    ### Sim task I: Get final statevector
+    result = simulator.run(qc_sim, shots = 1).result()
+    final_state = result.data()['final_state']
+
+    select_indexes = list(range(sel_size))
+    ctrl_indexes = list(range(sel_size, sel_size + ctrl_size))
+    sys_indexes = list(range(sel_size + ctrl_size, sel_size + ctrl_size + sys_size))
+
+    final_state_sys = projection_vec(
+        final_state,
+        sel_size + ctrl_size + sys_size,
+        sel_size + ctrl_size,
+        list(range(sel_size, sel_size + ctrl_size)),
+        qubit_regs=[select_indexes, ctrl_indexes, sys_indexes],
+    )
+    return final_state_sys
+    # return final_dm
+
+def simulate_circuit_dm(qc: QuantumCircuit, ini_state, sel_state, reg_sizes: list):
+    simulator = AerSimulator(method = 'density_matrix')
+    
+    sel_size, ctrl_size, sys_size = reg_sizes
+    qc_sim = QuantumCircuit(qc.num_qubits)
+
+    dens_sys_ctrl = ini_state.tensor(DensityMatrix.from_label('0' * ctrl_size))
+    dens_tot = dens_sys_ctrl.tensor(DensityMatrix(Statevector(sel_state)))
+    # qc = transpile(qc, simulator, optimization_level=1)
+    
+    qc_sim.append(SetDensityMatrix(dens_tot), qc_sim.qubits)
+    qc_sim.compose(qc, qc_sim.qubits, inplace=True)
+    # qc_sim.append(qc.to_gate(), qargs = qc_sim.qubits)
+    qc_sim.save_density_matrix(label = 'final_dm') #type: ignore
+    qc_sim = transpile(qc_sim, simulator, optimization_level=1)
+    print("Transpile complete, starting simulation... ")
+    result = simulator.run(qc_sim, shots = 1).result()
+    print("Simulation complete, processing results... ")
+    final_dm = result.data()['final_dm']
+
+    final_dm_sys = projection_op_dm(final_dm, [sel_size, ctrl_size, sys_size])
+    
+    
+    return final_dm_sys
+def simulate_circuit_TN(qc: QuantumCircuit, ini_state: Statevector, reg_sizes: list, return_opt: str = 'full'):
+    """
+    Construct a tensor network simulation of the circuit qc with initial state ini_state.
+    """
+    sel_size, ctrl_size, sys_size = reg_sizes
+    ancilla_size = sel_size + ctrl_size
+    simulator = AerSimulator(method = 'matrix_product_state')
+    simulator.set_options(matrix_product_state_max_bond_dimension=64)
+    qc_sim = QuantumCircuit(qc.qubits, qc.clbits)
+    qc_sim.initialize(ini_state)
+    # Compose may not preserve qubit mapping or controlled gate structure; use append for correct behavior
+    qc_sim.append(qc.to_gate(), qargs = qc_sim.qubits)
+    
+    qc_sim = transpile(qc_sim, simulator, optimization_level = 1)
+    
+    if return_opt == 'full':
+        qc_sim.save_density_matrix(qubits = list(range(qc_sim.num_qubits)), label = 'final_dm') # type: ignore
+        result = simulator.run(qc_sim, shots = 1).result()
+        raw_rho = result.data()['final_dm']
+        final_rho = DensityMatrix(normalize(projection_op(raw_rho, qc_sim.num_qubits, ctrl_size))) #type: ignore
+        final_rho_sys = np.asarray(partial_trace(final_rho, list(range(sel_size))))
+        return final_rho_sys
+    else:
+        anc_output = ClassicalRegister(ctrl_size, 'c_out')
+        qc_sim.add_register(anc_output)
+        for i in range(ctrl_size):
+            qc_sim.measure(qc_sim.qubits[i + sel_size], anc_output[i])
+    
+        with qc_sim.if_test((anc_output, 0)):
+            qc_sim.save_density_matrix(qubits = list(range(ancilla_size, ancilla_size + sys_size)), label = 'final_sys_dm') # type: ignore
+            
+        repeat = 100
+        for i in range(repeat):
+            result = simulator.run(qc_sim, shots = 1).result()
+            print(result.get_counts())
+            if list(result.get_counts().keys())[0] == '0'*ctrl_size:
+                raw_rho = result.data()['final_sys_dm']
+                break
+        # final_rho_sys = np.asarray(partial_trace(raw_rho, list(range(sel_size))))
+        final_rho_sys = np.asarray(raw_rho)
+        return final_rho_sys
+def construct_qobj_lind(Lind: Lindbladian, dim_sys: int):
+    """
+    Construct the Qobj representation of the Lindbladian superoperator.
+    """
+    H = Lind.H.eff_op() if Lind.H.eff_op() is not None else np.zeros((2**dim_sys, 2**dim_sys))
+    
+    H_qobj = Qobj(H, dims = [[2] * dim_sys, [2] * dim_sys])
+    L_qobj_list = []
+    for L in Lind.L_list:
+        L_qobj_list.append(Qobj(L.eff_op(), dims = [[2] * dim_sys, [2] * dim_sys]))
+   
+    return H_qobj, L_qobj_list
+
+    
+# ...existing code...
+def projection_op_dm_optimized(dm: DensityMatrix, reg_sizes_opt: list):
+    """
+    reg_sizes_opt = [sel_size, sel_aux_size, ctrl_size, sys_size]
+    where sel_aux_size = sel_size + 1 (top + sel_anc)
+    """
+    sel_size, sel_aux_size, ctrl_size, sys_size = reg_sizes_opt
+
+    proj_ctrl0 = Operator.from_label('0' * ctrl_size)
+    proj_sel_aux0 = Operator.from_label('0' * (sel_aux_size - 1)) if sel_aux_size > 1 else Operator(np.array([[1.0]]))
+    proj_top1 = Operator.from_label('1')
+    iden_sel = Operator.from_label('I' * sel_size)
+    iden_sys = Operator.from_label('I' * sys_size)
+
+    # qubit order in circuit is [top, sel, sel_anc, ctrl, sys]
+    # projector in same style as existing code (tensor from right to left blocks)
+    if sel_aux_size > 1:
+        proj_full = iden_sys.tensor(proj_ctrl0).tensor(proj_sel_aux0).tensor(iden_sel).tensor(proj_top1)
+    else:
+        proj_full = iden_sys.tensor(proj_ctrl0).tensor(iden_sel).tensor(proj_top1)
+
+    projected_dm = np.dot(np.dot(proj_full, dm), proj_full.adjoint())
+
+    # trace out all ancilla-like registers: top + sel + sel_anc + ctrl
+    anc_total = 1 + sel_size + (sel_aux_size - 1) + ctrl_size
+    projected_dm_sys = partial_trace(DensityMatrix(projected_dm), list(range(anc_total)))
+    return DensityMatrix(zero_small_complex(np.asarray(projected_dm_sys), tol=1e-6))
+
+
+def simulate_circuit_statevec_optimized(qc: QuantumCircuit, ini_state, sel_state, reg_sizes_opt: list):
+    """
+    Optimized-select simulator for circuit layout:
+    [sel_0, anc_0, sel_1, anc_1, ..., ctrl..., sys...]
+    """
+    simulator = AerSimulator(method='statevector')
+
+    sel_size, anc_size, ctrl_size, sys_size = reg_sizes_opt
+
+    select_indexes = [2 * j for j in range(sel_size)]
+    anc_indexes = [2 * j + 1 for j in range(sel_size)]
+    ctrl_indexes = list(range(2 * sel_size, 2 * sel_size + ctrl_size))
+    sys_indexes = list(range(2 * sel_size + ctrl_size, 2 * sel_size + ctrl_size + sys_size))
+
+    qc_sim = QuantumCircuit(qc.num_qubits)
+
+    state_sel = Statevector(sel_state)
+
+    if isinstance(ini_state, str):
+        state_sys = Statevector.from_label(ini_state)
+    elif isinstance(ini_state, Statevector):
+        state_sys = ini_state
+    else:
+        raise TypeError("ini_state must be str or Statevector for statevector simulation.")
+
+    qc_sim.initialize(state_sel, select_indexes)
+    if anc_size > 0:
+        qc_sim.initialize(Statevector.from_label('0' * anc_size), anc_indexes)
+    if ctrl_size > 0:
+        qc_sim.initialize(Statevector.from_label('0' * ctrl_size), ctrl_indexes)
+    qc_sim.initialize(state_sys, sys_indexes)
+    
+    qc_sim.compose(qc, qc_sim.qubits, inplace=True)
+    qc_sim = transpile(qc_sim, simulator, optimization_level=2)
+    qc_sim.save_statevector(label='final_state')  # type: ignore
+
+    result = simulator.run(qc_sim, shots=1).result()
+    final_state = result.data()['final_state']
+    return projection_vec(final_state, qc_sim.num_qubits, 0, [], qubit_regs=[select_indexes, anc_indexes, ctrl_indexes, sys_indexes])
+# ...existing code...
+def simulate_circuit_repeat(qc: QuantumCircuit, ini_state, sel_state, coeff_sum: float, reg_sizes: list, repeat: int):
+    """
+    Parameters:
+    -----------
+    qc: QuantumCircuit - 
+    ini_state: str, Statevector, or DensityMatrix - initial state for the first iteration
+    sel_state: array - state of the selection register
+    coeff_sum: float - 系数和
+    reg_sizes: list - [sel_size, ctrl_size, sys_size]
+    repeat: int 
+    Returns:
+    --------
+    final_state: DensityMatrix
+    """
+    sel_size, ctrl_size, sys_size = reg_sizes
+    
+    # 处理初始状态的类型
+    if isinstance(ini_state, DensityMatrix):
+        # 将DensityMatrix转换为Statevector以用于simulate_circuit_statevec
+        # 使用迹保留分解或其他方法
+        ini_state_sv = '+'  # 默认使用'+' 状态
+    elif isinstance(ini_state, str):
+        ini_state_sv = ini_state
+    else:
+        ini_state_sv = ini_state
+    
+    current_state = ini_state
+    
+    for iteration in range(repeat):
+        print(f"Starting iteration {iteration + 1}/{repeat}...")
+        
+        if iteration == 0:
+            # 第1次迭代：从初始态出发
+            final_state_sys = simulate_circuit_statevec(qc, ini_state_sv, sel_state, reg_sizes)
+            current_state = coeff_sum * final_state_sys
+            
+        else:
+            # 第k+1次迭代：使用前一次迭代的特征向量
+            # 对当前状态进行特征分解
+            dm_array = np.asarray(current_state)
+            
+            # 特征分解
+            eigenvalues, eigenvectors = np.linalg.eigh(dm_array)
+            
+            # 过滤掉接近零的特征值
+            nonzero_indices = np.where(eigenvalues > 1e-10)[0]
+            eigenvalues_nonzero = eigenvalues[nonzero_indices]
+            eigenvectors_nonzero = eigenvectors[:, nonzero_indices]
+            
+            num_basis = len(eigenvalues_nonzero)
+            print(f" Iteration {iteration}: Spectral Decomposition for previous result, obtaining {num_basis} non-zero eigenvalues.")
+            
+            # 初始化累积器
+            final_state_accumulated = np.zeros_like(dm_array, dtype=complex)
+            
+            # 对每个特征向量分别进行模拟
+            for i, (eigenvalue, eigenvector) in enumerate(zip(eigenvalues_nonzero, eigenvectors_nonzero)):
+                # 将特征向量转换为Statevector
+                basis_state = Statevector(eigenvector)
+                
+                # 用此基向量进行模拟
+                state_i = simulate_circuit_statevec(qc, basis_state, sel_state, reg_sizes)
+                state_i = coeff_sum * state_i
+                
+                # 根据特征值加权求和
+                final_state_accumulated += eigenvalue * np.asarray(state_i)
+                
+                print(f"    basis {i+1}/{num_basis} done, eigenvalue: {eigenvalue:.6f}")
+            
+            # 重新归一化
+            trace_val = np.trace(final_state_accumulated)
+            if abs(trace_val) > 1e-10:
+                final_state_accumulated = final_state_accumulated / trace_val
+            else:
+                print(f"    Warning: Trace is close to zero ({trace_val:.2e}), skipping normalization.")
+            
+            current_state = DensityMatrix(zero_small_complex(final_state_accumulated, tol=1e-6))
+            
+        print(f"  Iteration {iteration + 1} complete")
+    
+    return current_state
+    
+if __name__ == "__main__":
+    
+    ## Parameters for higher order series expansion test:
+    ## Empty Hamiltonian
+    H = []
+    ## Expansion order
+    K = 2
+    ## sampling points for quadrature
+    q = 4
+    ### evolution time
+    t = 0.1
+    ### decaying strength
+    v = 0.5
+    ### truncation order for J's Taylor series in each Kraus operator
+    K1 = 5
+    ### Sequence length
+    repeat = 1
+    ## Scaling factor for the lindbladian |L|_be < 1
+    scaling = 4.01
+
+    L_list = [[('X', np.sqrt(v + 1)/scaling), ('Y', 1j * np.sqrt(v + 1)/scaling)], [('X', np.sqrt(v)/scaling), ('Y', -1j * np.sqrt(v)/scaling)]]
+    decay_lind = Lindbladian(H, L_list)
+
+    ini_state = Statevector.from_label('+')
+    ## Create a baseline 
+    H_qobj, L_qobj_list = construct_qobj_lind(decay_lind, decay_lind.__size__())
+    qplus = (basis(2,0) + basis(2,1)).unit()
+    ini_state_qobj = qplus
+    final_dens = simulate_lindblad(H_qobj, L_qobj_list, ini_state_qobj, repeat * t, r = 10)
+    print("Baseline final density:", final_dens)
+    ### Create the evolution circuit
+    qc, reg_sizes, coeff_sum_sq, sel_state = construct_higher_order_circuit(decay_lind, K, q, t, K1)
+    higher_order_Lind_expansion(decay_lind, K, q, t, K1)
+    
+    ## Test I : Statevector simulation (evolve once )
+    # final_state_sys = simulate_circuit_statevec(qc, ini_state = '+', sel_state = sel_state, reg_sizes = reg_sizes)
+    # final_state_sys = coeff_sum_sq * final_state_sys
+    ## Test II: Density matrix simulation (evolve once)
+    # final_dm_sys = simulate_circuit_dm(qc, ini_state = DensityMatrix.from_label('+'), sel_state = sel_state, reg_sizes = reg_sizes)
+    # final_dm_sys = coeff_sum_sq * final_dm_sys 
+    ### Test III: Repeatedly applying circuit qc to simulate longer time 
+    final_dm_sys = simulate_circuit_repeat(qc, DensityMatrix.from_label('+'), sel_state, coeff_sum_sq, reg_sizes, repeat = repeat)
+    
+    # print("Simulated final density:", DensityMatrix(final_dens_sys))
+
+    
+    diff = final_dm_sys - final_dens
+    err = np.linalg.norm(diff, ord = 'nuc') / 2
+    print(f"Simulate error: {err}")

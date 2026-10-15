@@ -765,6 +765,9 @@ def _apply_layer_assignment(
     num_qubits: int,
     supersets: list[list[int]],
 ) -> _SearchState:
+    # Retain historical shared-prefix beam ranking. This is a heuristic when
+    # an axis shortcut introduces comparable addresses; the emitted residuals
+    # and final placement cost are reconstructed independently below.
     prefix = list(state.prefix)
     cost = state.cost
     placed_terms = {term_idx for term_idx, _address in assignment}
@@ -1340,8 +1343,8 @@ def search_for_pauli_placement(
             generators are used in this coverage proxy.
         swap_refinement: If true, run a local basis/nonbasis swap refinement on
             the final placement.
-        swap_refinement_max_terms: Skip local swap refinement when the returned
-            real placement is larger than this value. ``None`` means no limit.
+        swap_refinement_max_terms: Skip local swap refinement when the complete
+            placement, including padding, exceeds this value. ``None`` means no limit.
         padding_to_full_address: If true, append random padding Paulis during
             search so the nonzero control-address table is full.  The regular
             returned placement contains only the original terms, while debug
@@ -1762,28 +1765,25 @@ def search_for_pauli_placement(
         )
 
     best_state = min(complete_states, key=lambda state: state.cost)
-    padded_placement = [
+    final_placement = [
         (labels[term_idx], format(address, f"0{width}b"))
         for term_idx, address in sorted(best_state.placement, key=lambda item: item[1])
     ]
-    placement = [
-        (labels[term_idx], format(address, f"0{width}b"))
-        for term_idx, address in sorted(best_state.placement, key=lambda item: item[1])
-        if term_idx in real_output_indices
-    ]
-    padded_search_cost = best_state.cost
-    pre_refinement_cost = _placement_cost_from_modes(placement, num_qubits)
+    padded_search_cost = _placement_cost_from_modes(final_placement, num_qubits)
+    # The historical beam score can differ from the reconstructed residual
+    # cost. Record both; refinement and circuit synthesis use the actual table.
+    pre_refinement_cost = padded_search_cost
     refinement_applied = False
     refinement_skipped = False
     if (
         swap_refinement
         and (
             swap_refinement_max_terms is None
-            or len(placement) <= swap_refinement_max_terms
+            or len(final_placement) <= swap_refinement_max_terms
         )
     ):
-        placement, refined_cost = _basis_nonbasis_swap_refine(
-            placement,
+        final_placement, refined_cost = _basis_nonbasis_swap_refine(
+            final_placement,
             width=width,
             num_qubits=num_qubits,
         )
@@ -1792,12 +1792,22 @@ def search_for_pauli_placement(
         refined_cost = pre_refinement_cost
         refinement_skipped = swap_refinement and not (
             swap_refinement_max_terms is None
-            or len(placement) <= swap_refinement_max_terms
+            or len(final_placement) <= swap_refinement_max_terms
         )
+
+    # Refine one complete table, then derive both public views from it. A
+    # backend retaining dummy terms must consume the same refined placement.
+    padded_placement = list(final_placement)
+    real_labels = {labels[index] for index in real_output_indices}
+    placement = [(label, address) for label, address in final_placement if label in real_labels]
+    if refined_cost != _placement_cost_from_modes(padded_placement, num_qubits):
+        raise RuntimeError("Refined placement cost disagrees with the final table.")
 
     if return_debug:
         debug_info = {
             "best_cost": refined_cost,
+            "search_state_cost": best_state.cost,
+            "search_state_cost_matches_residuals": best_state.cost == padded_search_cost,
             "pre_refinement_cost": pre_refinement_cost,
             "padded_search_cost": padded_search_cost,
             "swap_refinement": swap_refinement,

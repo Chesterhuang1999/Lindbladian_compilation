@@ -1,0 +1,147 @@
+{
+  "input_kraus": [
+    [
+      [
+        "XX",
+        1.2535131086748066,
+        1.0,
+        0.0
+      ],
+      [
+        "IZ",
+        0.8297317164990922,
+        0.0,
+        -1.0
+      ],
+      [
+        "YY",
+        1.2884287034284043,
+        0.0,
+        1.0
+      ],
+      [
+        "IX",
+        0.9534978894806515,
+        1.0,
+        0.0
+      ],
+      [
+        "ZX",
+        0.6340416972471647,
+        -1.0,
+        0.0
+      ],
+      [
+        "XI",
+        0.7034552406761496,
+        -1.0,
+        0.0
+      ],
+      [
+        "IY",
+        0.7623133404418495,
+        -1.0,
+        0.0
+      ],
+      [
+        "XZ",
+        0.7804087579860399,
+        1.0,
+        0.0
+      ],
+      [
+        "YX",
+        0.9851909744316351,
+        0.0,
+        -1.0
+      ],
+      [
+        "ZY",
+        1.4616571936637868,
+        1.0,
+        0.0
+      ]
+    ],
+    [
+      [
+        "ZY",
+        0.7768912040453708,
+        -1.0,
+        0.0
+      ],
+      [
+        "IY",
+        0.6606520087751269,
+        0.0,
+        1.0
+      ]
+    ],
+    [
+      [
+        "ZZ",
+        0.6158656124707703,
+        0.0,
+        1.0
+      ],
+      [
+        "XX",
+        1.276683114342298,
+        -1.0,
+        0.0
+      ]
+    ],
+    [
+      [
+        "YX",
+        0.5395928766642029,
+        0.0,
+        -1.0
+      ],
+      [
+        "XY",
+        1.0285892632600215,
+        0.0,
+        -1.0
+      ]
+    ],
+    [
+      [
+        "XZ",
+        1.141328169139375,
+        1.0,
+        0.0
+      ],
+      [
+        "ZX",
+        1.092941018104284,
+        0.0,
+        -1.0
+      ]
+    ]
+  ],
+  "model": {
+    "model": "random_pauli_kraus_channel",
+    "kraus_count": 5,
+    "hilbert_dim": 4,
+    "system_qubits": 2,
+    "first_kraus_terms": 10,
+    "other_kraus_terms": 2,
+    "seed": 1,
+    "term_counts": [
+      10,
+      2,
+      2,
+      2,
+      2
+    ],
+    "coefficient_magnitude_distribution": "uniform[0.5,1.5)",
+    "coefficient_phase_distribution": "uniform over {1,-1,i,-i}",
+    "pauli_label_policy": "unique non-identity labels per Kraus operator",
+    "historical_input_policy": "RQ1 original dim4/dim8 preserved as explicit 2q/3q; D07 4q correction is a separate dataset",
+    "suite_case": "RandCh-N5-actual2q-seed1",
+    "builder_sources": {
+      "build_random_channel_lcu_benchmark.py": "49e0b427180cac8bd6540211a008363d2f22ad4f5f8ae4a5d715bb8b5521f87f"
+    },
+    "suite_builder_sha256": "c53d2f54844179f5c3b52dcb8df7c4cc4f2a13a18ca4ce441701dccf3ec964f8"
+  }
+}

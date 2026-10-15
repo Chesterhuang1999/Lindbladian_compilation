@@ -1,0 +1,1 @@
+../../../../Baseline_scripts/run_mcg_tool_raw_channel_lcu_benchmarks.py

@@ -1,0 +1,1 @@
+../../../../scripts/run_cp4a_rq3_coherent_kqk1_accuracy.py

@@ -29,7 +29,7 @@ if str(BASELINE_DIR) not in sys.path:
     sys.path.insert(0, str(BASELINE_DIR))
 
 from baseline_common import compare_gate_stats, count_qasm_file  # type: ignore  # noqa: E402
-from block_encoding_new import BlockEncoding as NewBlockEncoding  # type: ignore  # noqa: E402
+from block_encoding import BlockEncoding as NewBlockEncoding  # type: ignore  # noqa: E402
 from channel_IR import channel_ensemble  # type: ignore  # noqa: E402
 from hypercube_channel_pauli import build_hypercube_section52_channel  # type: ignore  # noqa: E402
 import channel_LCU  # type: ignore  # noqa: E402

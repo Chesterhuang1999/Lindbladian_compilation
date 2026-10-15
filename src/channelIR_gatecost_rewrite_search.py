@@ -3,8 +3,8 @@
 This module implements an H_length-style search objective.  The current
 candidate generator is intentionally conservative: it reuses ChannelIR's
 existing two-row unitary-mixing candidates, but ranks and accepts candidates by
-an estimated generic StatePreparation/control T-count cost instead of total
-Pauli support alone.
+a static Lambda-weighted non-Clifford estimate instead of total Pauli support
+alone. The historical unweighted model remains an explicit reproduction mode.
 """
 
 from __future__ import annotations
@@ -14,6 +14,13 @@ from itertools import combinations
 from typing import Any
 
 import numpy as np
+
+try:
+    from .channel_rewrite_cost import (CostSettings, STATIC_COST_MODEL, LEGACY_COST_MODEL,
+                                      components_from_rows, summarize_row, h_length_components)
+except ImportError:
+    from channel_rewrite_cost import (CostSettings, STATIC_COST_MODEL, LEGACY_COST_MODEL,
+                                     components_from_rows, summarize_row, h_length_components)
 
 
 def ceil_log2(value: int) -> int:
@@ -61,7 +68,7 @@ def row_supports(A: np.ndarray, tol: float = 1e-12) -> np.ndarray:
 
 def h_length_components_from_supports(supports: np.ndarray | list[int]) -> dict[str, int]:
     """
-    Compute the H_length heuristic components from row support sizes.
+    Historical unweighted H_length components from row support sizes.
 
     The cost model is:
         outer prep
@@ -122,13 +129,18 @@ def h_length_components_from_supports(supports: np.ndarray | list[int]) -> dict[
 
 
 def h_length_cost_from_supports(supports: np.ndarray | list[int]) -> int:
-    """Return the scalar H_length cost from row support sizes."""
+    """Legacy support-only score; the new model requires coefficient values."""
     return h_length_components_from_supports(supports)["total"]
 
 
-def h_length_cost(A: np.ndarray, tol: float = 1e-12) -> int:
-    """Return the scalar H_length cost for a coefficient matrix."""
-    return h_length_cost_from_supports(row_supports(A, tol))
+def h_length_cost(A: np.ndarray, tol: float = 1e-12, *, cost_model=STATIC_COST_MODEL,
+                  structure="tree", fstar=None) -> float:
+    """Return the static weighted cost; legacy requires an explicit model ID."""
+    if cost_model == LEGACY_COST_MODEL:
+        return h_length_cost_from_supports(row_supports(A, tol))
+    if cost_model != STATIC_COST_MODEL:
+        raise ValueError(f"Unknown rewrite cost model: {cost_model}")
+    return h_length_components(A, tol, structure=structure, fstar=fstar)["total"]
 
 
 def _future_potential(ir_cls: type, A: np.ndarray, pair: tuple[int, int], tol: float):
@@ -147,22 +159,28 @@ def _candidate_gatecost_rotations(
     ir_cls: type,
     A: np.ndarray,
     supports: np.ndarray,
-    current_cost: int,
+    current_cost: float,
     tol: float,
     keep_neutral: bool,
     max_neutral_candidates: int | None,
     skip_disjoint_pairs: bool,
+    cost_settings: CostSettings | None,
 ) -> list[dict[str, Any]]:
     """Generate non-increasing H_length two-row rotation candidates."""
     candidates: list[dict[str, Any]] = []
     m = A.shape[0]
+    # Summarize once per frontier state; each candidate only rescans two rows.
+    rows = [summarize_row(row, tol) for row in A] if cost_settings is not None else None
 
     for i, j in combinations(range(m), 2):
         shared = ir_cls._pair_shared_support(A, i, j, tol)
         if skip_disjoint_pairs and shared == 0:
             continue
 
-        before_potential = _future_potential(ir_cls, A, (i, j), tol)
+        # Neutral lookahead is expensive and irrelevant when plateaus are off.
+        # Preserve the old tie-breaking in explicit historical mode.
+        lookahead = keep_neutral or cost_settings is None
+        before_potential = _future_potential(ir_cls, A, (i, j), tol) if lookahead else None
         before_score = _future_score(before_potential)
         seen_unitaries = set()
         pair_candidates: list[dict[str, Any]] = []
@@ -193,11 +211,18 @@ def _candidate_gatecost_rotations(
             new_supports[i] = new_support_i
             new_supports[j] = new_support_j
 
-            new_cost = h_length_cost_from_supports(new_supports)
-            if new_cost > current_cost:
+            if rows is None:
+                new_cost = h_length_cost_from_supports(new_supports)
+            else:
+                new_rows = rows.copy()
+                new_rows[i] = summarize_row(new_i, tol)
+                new_rows[j] = summarize_row(new_j, tol)
+                new_cost = components_from_rows(new_rows, cost_settings)["total"]
+            equal_cost = math.isclose(new_cost, current_cost, rel_tol=1e-12, abs_tol=0.0)
+            if new_cost > current_cost and not equal_cost:
                 continue
 
-            reason = "improve" if new_cost < current_cost else "neutral"
+            reason = "neutral" if equal_cost else "improve"
             if reason == "neutral" and not keep_neutral:
                 continue
 
@@ -205,7 +230,7 @@ def _candidate_gatecost_rotations(
             B[i] = new_i
             B[j] = new_j
 
-            after_potential = _future_potential(ir_cls, B, (i, j), tol)
+            after_potential = _future_potential(ir_cls, B, (i, j), tol) if lookahead else None
             after_score = _future_score(after_potential)
             if reason == "neutral" and after_score <= before_score:
                 continue
@@ -231,7 +256,7 @@ def _candidate_gatecost_rotations(
                     "pair": (i, j),
                     "U": U,
                     "A": B,
-                    "cost": int(new_cost),
+                    "cost": new_cost,
                     "support": new_total_support,
                     "row_supports": new_supports,
                     "pair_delta": pair_delta,
@@ -265,6 +290,9 @@ def gatecost_rewrite_search(
     keep_neutral: bool = False,
     max_neutral_candidates: int | None = 3,
     skip_disjoint_pairs: bool = True,
+    cost_model: str = STATIC_COST_MODEL,
+    structure: str = "tree",
+    fstar: bool | None = None,
 ) -> dict[str, Any]:
     """
     Search for two-row unitary rewrites using H_length as the objective.
@@ -280,6 +308,9 @@ def gatecost_rewrite_search(
             local future-potential score improves.
         max_neutral_candidates: Per-pair cap for neutral candidates.
         skip_disjoint_pairs: Skip pairs with no shared Pauli support.
+        cost_model: Static Lambda-weighted NC model, or explicit legacy model ID.
+        structure, fstar: The downstream outer lowering being estimated.
+            Inner SELECT is fixed; candidate scoring never runs placement.
 
     Returns:
         A result dictionary compatible with channel.apply_rewrite_result().
@@ -289,12 +320,21 @@ def gatecost_rewrite_search(
         raise ValueError(f"Unknown gatecost rewrite strategy: {strategy}")
     if strategy == "greedy":
         beam_width = 1
+    if cost_model not in (STATIC_COST_MODEL, LEGACY_COST_MODEL):
+        raise ValueError(f"Unknown rewrite cost model: {cost_model}")
+    resolved_settings = CostSettings(structure, fstar)
+    cost_settings = resolved_settings if cost_model == STATIC_COST_MODEL else None
 
     A, labels = channel_ir._coeff_matrix(tol)
     ir_cls = channel_ir.__class__
 
     initial_supports = row_supports(A, tol)
-    initial_components = h_length_components_from_supports(initial_supports)
+    def evaluate(matrix):
+        if cost_settings is None:
+            return h_length_components_from_supports(row_supports(matrix, tol))
+        return h_length_components(matrix, tol, structure=structure, fstar=cost_settings.fstar)
+
+    initial_components = evaluate(A)
     initial_cost = initial_components["total"]
     initial_support = int(np.sum(initial_supports))
 
@@ -343,6 +383,7 @@ def gatecost_rewrite_search(
                 keep_neutral,
                 max_neutral_candidates,
                 skip_disjoint_pairs,
+                cost_settings,
             )
             generated += len(candidates)
 
@@ -363,7 +404,7 @@ def gatecost_rewrite_search(
                         "reason": cand["reason"],
                         "cost": new_cost,
                         "support": new_support,
-                        "cost_delta": int(new_cost - current_cost),
+                        "cost_delta": new_cost - current_cost,
                         "pair_delta": cand["pair_delta"],
                         "shared_support": cand["shared_support"],
                     }
@@ -379,9 +420,9 @@ def gatecost_rewrite_search(
                     )
                 )
 
-                best_key = (global_best[0], global_best[1])
-                cand_key = (new_cost, new_support)
-                if cand_key < best_key:
+                equal_best = math.isclose(new_cost, global_best[0], rel_tol=1e-12, abs_tol=0.0)
+                if ((new_cost < global_best[0] and not equal_best)
+                        or (equal_best and new_support < global_best[1])):
                     global_best = (
                         new_cost,
                         new_support,
@@ -421,12 +462,14 @@ def gatecost_rewrite_search(
 
     final_cost, final_support, final_A, final_supports, final_steps, final_meta = global_best
     return {
-        "cost_model": "H_length_generic_stateprep",
+        "cost_model": cost_model,
+        "cost_settings": (cost_settings.metadata() if cost_settings is not None
+                          else {"cost_model": LEGACY_COST_MODEL, "Lambda_weighted": False}),
         "strategy": strategy,
-        "initial_cost": int(initial_cost),
-        "final_cost": int(final_cost),
+        "initial_cost": initial_cost,
+        "final_cost": final_cost,
         "initial_cost_components": initial_components,
-        "final_cost_components": h_length_components_from_supports(final_supports),
+        "final_cost_components": evaluate(final_A),
         "initial_support": int(initial_support),
         "final_support": int(final_support),
         "initial_row_supports": initial_supports.tolist(),

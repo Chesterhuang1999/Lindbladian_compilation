@@ -1,0 +1,155 @@
+{
+  "schema_version": 2,
+  "case_ids": [
+    "Collective4",
+    "Local_QSW3",
+    "Petz_TFIM2",
+    "TFIM3_HO",
+    "Thermal2_HO"
+  ],
+  "upstream_runtime": "paper_experiments/pending_review/rq2_hybrid_ablation_20261014/source_snapshot",
+  "files": {
+    "Baseline_scripts/baseline_common.py": "d893a7ba14816b168a065e02701c5bfad056da715900b65dfde4a1d44c69fd06",
+    "paper_experiments/experiments_new/fixture_benchmarks/config.json": "29f6f76f6a55cb280e783ab084e7aa3de7b56e4fe99ae21cf48a2e0630fc7b9a",
+    "paper_experiments/experiments_new/fixture_benchmarks/inputs/Collective4.json": "26372ff7d11944eec92d75e0022a4baf00a00bca18a20ab54f217f49461c4531",
+    "paper_experiments/experiments_new/fixture_benchmarks/inputs/Local_QSW3.json": "a14266589c31097ca8cb1e92c5e66a1610ab65a5802423aa8f12214568e30bd6",
+    "paper_experiments/experiments_new/fixture_benchmarks/inputs/Petz_TFIM2.json": "c36ea64de5c9bd5869ef9b6cd474e7c32d297347d468903e31f2eb5361802714",
+    "paper_experiments/experiments_new/fixture_benchmarks/inputs/TFIM3_HO.json": "5ae0f8ad07623d8dfecd0e8dc1e0c11488b2701a039cc5f570aae70838c711ab",
+    "paper_experiments/experiments_new/fixture_benchmarks/inputs/Thermal2_HO.json": "a656e8b83e3a40aa3424511706e5a535e218836a9aa8fbe878b1a777c4615287",
+    "scripts/eval_redesign/hybrid_candidate_kernel.py": "35d91e0f892f87fc7c7836be614f86e7874aee188abd6745487377aed5523c0b",
+    "scripts/eval_redesign/hybrid_rewrite.py": "898e4f8b1abe86ed4a6a68720b1dcf500ca57fc1b990ff00fcd7181bb816337c",
+    "scripts/eval_redesign/run_rq2_hybrid_ablation.py": "a6411079fd2bec1f4cd492d07825610294e75e2b84d9a91795b44738dcff21fd",
+    "scripts/eval_redesign/run_selected_tfim_hrw.py": "3723ce75731b498209105f48e28dd9575e7a489f55a72bcf4d871689b34a176d",
+    "scripts/eval_redesign/selected_channel_inputs.py": "ea0495913b3b9695258fe82e3387dcc6708db75d36de974190b86c0e0e6912e1",
+    "src/baseline.py": "14b4000ef453c398bc675d17a4e7e2c2d7b289ea0447dd6c1122ead4f00c1a87",
+    "src/block_encoding.py": "3e791c533c37b4b256be24b87080203b2fdea9bd2d3242e1dadc30d65fc5c1fb",
+    "src/block_encoding_new.py": "a4816624d5b0a0b5b061a3db09c9137c026bfc35803c8625e0eccd3c83746d57",
+    "src/block_encoding_new_fixed.py": "a4816624d5b0a0b5b061a3db09c9137c026bfc35803c8625e0eccd3c83746d57",
+    "src/channelIR_gatecost_rewrite_search.py": "c054b1a9892f3d6f4df1d12be8c589cad81dcd69b33c5da7d341489727146536",
+    "src/channel_IR.py": "c753f5eb58bd468c156187300f39ac51cb0d936926b0a9c59016749022132cbb",
+    "src/channel_LCU.py": "0a105c147f1c82c185e3ee0f8c3ca2eb85034a16b684046f3ddf102b8c71d8ea",
+    "src/channel_rewrite_cost.py": "494693a0ba245600b45688c76d18ac843a4d279e00ce7ba43993217d96a4455c",
+    "src/experiment_protocol.py": "97d9a5536a95802927b15bd886815df4e3651deb7b02542e7bd5169608daff37",
+    "src/matrix_order_pipeline.py": "8e55f632175c8af8ede40065d035dd867aac50da8eb90f677566870834c69db7",
+    "src/mobius_residual_fixed.py": "0e553f919c4ab32f000aa122ca4cfc79c77774e2ad35732951c52fe0c392e92f",
+    "src/placement_search.py": "ee40ab7f9de89eddfeaa6781c846637a156271a34f120b90206d9446860a410f",
+    "src/qrisp_channel_adapter.py": "96d3e31118efb63b0920d426460c4edeb788ceecf0178d6299f403d6411fe1d0",
+    "src/rq1_pipeline.py": "1b86efa69a4fa8aeded2713485c37054997d4893088dec31ccf04f4b4a841695",
+    "src/subroutine.py": "9f46362d69e7f14487389236b38c8a57daff22d1a296bc5cd004a00ca4df1f0a"
+  },
+  "copied_sources": {
+    "scripts/eval_redesign/run_rq2_hybrid_ablation.py": {
+      "source": "paper_experiments/pending_review/rq2_hybrid_ablation_20261014/source_snapshot/scripts/eval_redesign/run_rq2_hybrid_ablation.py",
+      "sha256": "e9302c5d951c96e609f2ab2f66a628f341b1693360770811fe720cf812bc6677"
+    },
+    "scripts/eval_redesign/hybrid_rewrite.py": {
+      "source": "paper_experiments/pending_review/rq2_hybrid_ablation_20261014/source_snapshot/scripts/eval_redesign/hybrid_rewrite.py",
+      "sha256": "898e4f8b1abe86ed4a6a68720b1dcf500ca57fc1b990ff00fcd7181bb816337c"
+    },
+    "scripts/eval_redesign/hybrid_candidate_kernel.py": {
+      "source": "paper_experiments/pending_review/rq2_hybrid_ablation_20261014/source_snapshot/scripts/eval_redesign/hybrid_candidate_kernel.py",
+      "sha256": "35d91e0f892f87fc7c7836be614f86e7874aee188abd6745487377aed5523c0b"
+    },
+    "scripts/eval_redesign/selected_channel_inputs.py": {
+      "source": "paper_experiments/pending_review/rq2_hybrid_ablation_20261014/source_snapshot/scripts/eval_redesign/selected_channel_inputs.py",
+      "sha256": "ea0495913b3b9695258fe82e3387dcc6708db75d36de974190b86c0e0e6912e1"
+    },
+    "scripts/eval_redesign/run_selected_tfim_hrw.py": {
+      "source": "paper_experiments/pending_review/rq2_hybrid_ablation_20261014/source_snapshot/scripts/eval_redesign/run_selected_tfim_hrw.py",
+      "sha256": "3723ce75731b498209105f48e28dd9575e7a489f55a72bcf4d871689b34a176d"
+    },
+    "Baseline_scripts/baseline_common.py": {
+      "source": "paper_experiments/pending_review/rq2_hybrid_ablation_20261014/source_snapshot/Baseline_scripts/baseline_common.py",
+      "sha256": "d893a7ba14816b168a065e02701c5bfad056da715900b65dfde4a1d44c69fd06"
+    },
+    "src/baseline.py": {
+      "source": "paper_experiments/pending_review/rq2_hybrid_ablation_20261014/source_snapshot/src/baseline.py",
+      "sha256": "14b4000ef453c398bc675d17a4e7e2c2d7b289ea0447dd6c1122ead4f00c1a87"
+    },
+    "src/block_encoding.py": {
+      "source": "paper_experiments/pending_review/rq2_hybrid_ablation_20261014/source_snapshot/src/block_encoding.py",
+      "sha256": "3e791c533c37b4b256be24b87080203b2fdea9bd2d3242e1dadc30d65fc5c1fb"
+    },
+    "src/block_encoding_new.py": {
+      "source": "paper_experiments/pending_review/rq2_hybrid_ablation_20261014/source_snapshot/src/block_encoding_new.py",
+      "sha256": "a4816624d5b0a0b5b061a3db09c9137c026bfc35803c8625e0eccd3c83746d57"
+    },
+    "src/block_encoding_new_fixed.py": {
+      "source": "paper_experiments/pending_review/rq2_hybrid_ablation_20261014/source_snapshot/src/block_encoding_new_fixed.py",
+      "sha256": "a4816624d5b0a0b5b061a3db09c9137c026bfc35803c8625e0eccd3c83746d57"
+    },
+    "src/channelIR_gatecost_rewrite_search.py": {
+      "source": "paper_experiments/pending_review/rq2_hybrid_ablation_20261014/source_snapshot/src/channelIR_gatecost_rewrite_search.py",
+      "sha256": "c054b1a9892f3d6f4df1d12be8c589cad81dcd69b33c5da7d341489727146536"
+    },
+    "src/channel_IR.py": {
+      "source": "paper_experiments/pending_review/rq2_hybrid_ablation_20261014/source_snapshot/src/channel_IR.py",
+      "sha256": "c753f5eb58bd468c156187300f39ac51cb0d936926b0a9c59016749022132cbb"
+    },
+    "src/channel_LCU.py": {
+      "source": "paper_experiments/pending_review/rq2_hybrid_ablation_20261014/source_snapshot/src/channel_LCU.py",
+      "sha256": "0a105c147f1c82c185e3ee0f8c3ca2eb85034a16b684046f3ddf102b8c71d8ea"
+    },
+    "src/channel_rewrite_cost.py": {
+      "source": "paper_experiments/pending_review/rq2_hybrid_ablation_20261014/source_snapshot/src/channel_rewrite_cost.py",
+      "sha256": "494693a0ba245600b45688c76d18ac843a4d279e00ce7ba43993217d96a4455c"
+    },
+    "src/experiment_protocol.py": {
+      "source": "paper_experiments/pending_review/rq2_hybrid_ablation_20261014/source_snapshot/src/experiment_protocol.py",
+      "sha256": "97d9a5536a95802927b15bd886815df4e3651deb7b02542e7bd5169608daff37"
+    },
+    "src/matrix_order_pipeline.py": {
+      "source": "paper_experiments/pending_review/rq2_hybrid_ablation_20261014/source_snapshot/src/matrix_order_pipeline.py",
+      "sha256": "8e55f632175c8af8ede40065d035dd867aac50da8eb90f677566870834c69db7"
+    },
+    "src/mobius_residual_fixed.py": {
+      "source": "paper_experiments/pending_review/rq2_hybrid_ablation_20261014/source_snapshot/src/mobius_residual_fixed.py",
+      "sha256": "0e553f919c4ab32f000aa122ca4cfc79c77774e2ad35732951c52fe0c392e92f"
+    },
+    "src/placement_search.py": {
+      "source": "paper_experiments/pending_review/rq2_hybrid_ablation_20261014/source_snapshot/src/placement_search.py",
+      "sha256": "ee40ab7f9de89eddfeaa6781c846637a156271a34f120b90206d9446860a410f"
+    },
+    "src/qrisp_channel_adapter.py": {
+      "source": "paper_experiments/pending_review/rq2_hybrid_ablation_20261014/source_snapshot/src/qrisp_channel_adapter.py",
+      "sha256": "96d3e31118efb63b0920d426460c4edeb788ceecf0178d6299f403d6411fe1d0"
+    },
+    "src/rq1_pipeline.py": {
+      "source": "paper_experiments/pending_review/rq2_hybrid_ablation_20261014/source_snapshot/src/rq1_pipeline.py",
+      "sha256": "1b86efa69a4fa8aeded2713485c37054997d4893088dec31ccf04f4b4a841695"
+    },
+    "src/subroutine.py": {
+      "source": "paper_experiments/pending_review/rq2_hybrid_ablation_20261014/source_snapshot/src/subroutine.py",
+      "sha256": "9f46362d69e7f14487389236b38c8a57daff22d1a296bc5cd004a00ca4df1f0a"
+    }
+  },
+  "required_packages": [
+    "numpy",
+    "qiskit",
+    "qiskit_aer",
+    "scipy",
+    "sympy",
+    "numba",
+    "psutil",
+    "qsppack",
+    "pyqsp",
+    "qutip"
+  ],
+  "algorithm": "support_frontier_two_seed_admit_support_v1",
+  "output_basis": [
+    "rz",
+    "h",
+    "x",
+    "cx"
+  ],
+  "default_action": "check dependencies and print plan; no preparation or experiments",
+  "closure_policy": "Shared compiler and driver sources live outside the experiment directory. Preparation verifies this bounded file list and freezes the 21 Python dependencies, the five raw inputs, and the resolved configuration into the new run. Original copied_sources entries remain upstream provenance; current hashes are in files. Other input-family builders and general run_selected workers are not exposed by this entry point.",
+  "file_paths_relative_to": "repository root",
+  "source_layout": {
+    "compiler": "src/",
+    "drivers": "scripts/eval_redesign/",
+    "baseline_helpers": "Baseline_scripts/baseline_common.py",
+    "inputs": "paper_experiments/experiments_new/fixture_benchmarks/inputs",
+    "config": "paper_experiments/experiments_new/fixture_benchmarks/config.json"
+  }
+}

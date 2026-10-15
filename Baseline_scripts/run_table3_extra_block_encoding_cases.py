@@ -30,7 +30,7 @@ for candidate in (ROOT / "src", ROOT / "scripts", ROOT / "Baseline_scripts"):
     if str(candidate) not in sys.path:
         sys.path.insert(0, str(candidate))
 
-from block_encoding_new import BlockEncoding as CurrentBlockEncoding  # type: ignore  # noqa: E402
+from block_encoding import BlockEncoding as CurrentBlockEncoding  # type: ignore  # noqa: E402
 from channel_IR import Matrixsum, PauliAtom  # type: ignore  # noqa: E402
 from run_mcg_tool_raw_channel_lcu_benchmarks import (  # type: ignore  # noqa: E402
     BenchmarkSpec,
@@ -203,7 +203,7 @@ def count_qrisp_from_lcu_phase_unitaries(ms: Matrixsum, out_dir: Path, prefix: s
 def count_ours_block_encoding_new(ms: Matrixsum, out_dir: Path, prefix: str) -> dict[str, Any]:
     result: dict[str, Any] = {
         "method": "ours_block_encoding_new_current",
-        "class": "block_encoding_new.BlockEncoding",
+        "class": "block_encoding.BlockEncoding",
         "term_count": int(len(ms.instances)),
         "natural_width": int(natural_width(ms)),
         "rank_width_heuristic_env": os.environ.get("CHANNEL_LCU_ENABLE_RANK_WIDTH_HEURISTIC"),

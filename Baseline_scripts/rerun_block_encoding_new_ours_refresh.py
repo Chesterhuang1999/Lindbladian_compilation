@@ -4,7 +4,7 @@
 This script is for rerunning the in-house Matrix-order path after local
 ``block_encoding_new.py`` changes.  It rebuilds the same benchmark inputs as
 ``run_block_encoding_new_qrisp_comparison.py``, recomputes only the in-house
-``block_encoding_new.BlockEncoding(...).circuit(opt="Matrix-order")`` counts,
+``block_encoding.BlockEncoding(...).circuit(opt="Matrix-order")`` counts,
 and copies the previous Qrisp results into the new summary/table.
 """
 
@@ -27,7 +27,7 @@ for candidate in (ROOT / "src", ROOT / "scripts", ROOT / "Baseline_scripts"):
     if str(candidate) not in sys.path:
         sys.path.insert(0, str(candidate))
 
-from block_encoding_new import BlockEncoding as CurrentBlockEncoding  # type: ignore  # noqa: E402
+from block_encoding import BlockEncoding as CurrentBlockEncoding  # type: ignore  # noqa: E402
 from channel_IR import Matrixsum, PauliAtom  # type: ignore  # noqa: E402
 from run_block_encoding_new_qrisp_comparison import (  # type: ignore  # noqa: E402
     build_benchmark_current,
@@ -75,7 +75,7 @@ def load_json(path: Path) -> dict[str, Any]:
 def count_ours_current(ms: Any, out_dir: Path, prefix: str) -> dict[str, Any]:
     result: dict[str, Any] = {
         "method": "ours_block_encoding_new_current",
-        "class": "block_encoding_new.BlockEncoding",
+        "class": "block_encoding.BlockEncoding",
         "term_count": int(len(ms.instances)),
         "natural_width": int(natural_width(ms)),
         "rank_width_heuristic_env": os.environ.get("CHANNEL_LCU_ENABLE_RANK_WIDTH_HEURISTIC"),
@@ -174,7 +174,7 @@ def run_rewritten_benchmark_refresh(
         "policy": {
             "qrisp_input": "copied from previous fixed Qrisp summary",
             "ours_input": "same rewritten Kraus operator terms",
-            "ours_class": "block_encoding_new.BlockEncoding",
+            "ours_class": "block_encoding.BlockEncoding",
             "sum_scope": "sum of per-Kraus block-encoding counts; no outer channel-LCU select/prepare",
         },
         "kraus_results": [],
@@ -466,7 +466,7 @@ def write_refresh_table(summary: dict[str, Any], md_path: Path, tex_path: Path) 
         "# Refreshed block_encoding_new Ours vs Qrisp",
         "",
         "Cells report `gates / non-Clifford / width` after Qiskit opt0 lowering.",
-        "Ours was rerun with the current `block_encoding_new.BlockEncoding` and `circuit(opt=\"Matrix-order\")`; Qrisp entries are copied from the fixed previous baseline summary.",
+        "Ours was rerun with the current `block_encoding.BlockEncoding` and `circuit(opt=\"Matrix-order\")`; Qrisp entries are copied from the fixed previous baseline summary.",
         "",
         "| example | basis | refreshed ours block_encoding_new | Qrisp | Qrisp/ours |",
         "| --- | --- | ---: | ---: | ---: |",
@@ -484,7 +484,7 @@ def write_refresh_table(summary: dict[str, Any], md_path: Path, tex_path: Path) 
             "- HRW, random coloring, and repetition DQE rows sum over all nonempty rewritten Kraus operators.",
             "- TFIM rows use the first nonempty Kraus operator A0.",
             "- Random-Pauli rows report 10-sample means using the same seeds as the previous run.",
-            "- Full Pauli n=6 uses the generic `block_encoding_new.BlockEncoding` interface, not the closed-form structured shortcut.",
+            "- Full Pauli n=6 uses the generic `block_encoding.BlockEncoding` interface, not the closed-form structured shortcut.",
         ]
     )
     md_path.parent.mkdir(parents=True, exist_ok=True)

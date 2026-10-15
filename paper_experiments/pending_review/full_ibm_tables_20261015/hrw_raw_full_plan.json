@@ -1,0 +1,21 @@
+{
+  "cases": [
+    "HRW-8",
+    "HRW-12",
+    "HRW-28"
+  ],
+  "policy": {
+    "max_workers": 1,
+    "worker_rss_gib": 32,
+    "aggregate_rss_gib": 32,
+    "minimum_available_gib": 32,
+    "stage_timeout_s": 43200,
+    "worker_timeout_s": 86400
+  },
+  "workers": {
+    "hrw_raw_full_worker.py": "8b25303003a57ff2e58ebbc82aadcf78a08670336f318d456af927614e17b097",
+    "remote_hrw_raw_full.py": "ce5c903f345b41cb7dff1b589a8d5b281cfbd1e04f637819c8069721f01c0bb6"
+  },
+  "frozen_manifest_sha256": "62dbfdfb0d2ec80b6e2e9a2590dadbdcd35dcbff40e74d9b2cf8496563972f5e",
+  "purpose": "One fresh remote Raw compilation followed by whole-circuit IBM Qiskit opt3 per case; preserve prior local results"
+}

@@ -1,3 +1,0 @@
-[submodule "external_tools/quartz"]
-	path = external_tools/quartz
-	url = https://github.com/quantum-compiler/quartz.git

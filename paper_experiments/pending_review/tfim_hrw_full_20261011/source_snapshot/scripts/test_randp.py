@@ -1,0 +1,352 @@
+from __future__ import annotations
+
+import argparse
+import os
+import sys
+import tempfile
+import time
+from itertools import product
+from pathlib import Path
+
+import numpy as np
+
+_CACHE_DIR = Path(tempfile.gettempdir()) / "lindbladian_compilation_cache"
+(_CACHE_DIR / "matplotlib").mkdir(parents=True, exist_ok=True)
+(_CACHE_DIR / "xdg").mkdir(parents=True, exist_ok=True)
+os.environ.setdefault("MPLCONFIGDIR", str(_CACHE_DIR / "matplotlib"))
+os.environ.setdefault("XDG_CACHE_HOME", str(_CACHE_DIR / "xdg"))
+
+from qiskit import QuantumCircuit, transpile
+
+ROOT = Path(__file__).resolve().parents[1]
+SRC_DIR = ROOT / "src"
+if str(SRC_DIR) not in sys.path:
+    sys.path.insert(0, str(SRC_DIR))
+
+from block_encoding_new import BlockEncoding
+from channel_IR import Matrixsum, PauliAtom
+from qasm_export import export_openqasm3_baseline
+
+
+DATA_DIR = ROOT / "Data"
+DEFAULT_QUBITS = (4, 6, 8, 10)
+DEFAULT_OPTS = ("No", "Ctrl-line", "Matrix-order")
+BLOCK_ENCODING_IMPL = "block_encoding_new.BlockEncoding"
+
+
+def _count_metrics(
+    qc: QuantumCircuit,
+    basis_gates: tuple[str, ...],
+    optimization_level: int,
+) -> dict[str, int]:
+    tqc = transpile(
+        qc,
+        basis_gates=list(basis_gates),
+        optimization_level=optimization_level,
+    )
+    ops = tqc.count_ops()
+    return {
+        "depth": int(tqc.depth()),
+        "size": int(tqc.size()),
+        "cx": int(ops.get("cx", 0)),
+        "u3": int(ops.get("u3", 0)),
+        "num_qubits": int(tqc.num_qubits),
+    }
+
+
+def _ratio(curr: int, base: int) -> float:
+    if base == 0:
+        return float("nan")
+    return 1.0 - (curr / base)
+
+
+def _label_from_product_index(index: int, num_qubits: int) -> str:
+    alphabet = "IXYZ"
+    chars = ["I"] * num_qubits
+    for pos in range(num_qubits - 1, -1, -1):
+        index, digit = divmod(index, len(alphabet))
+        chars[pos] = alphabet[digit]
+    return "".join(chars)
+
+
+def build_random_pauli_matrixsum(num_qubits: int, seed: int = 20260314) -> Matrixsum:
+    """Build the random Pauli Matrixsum from evaluate.ipynb cell f2deabc9."""
+    num_terms = max(num_qubits * num_qubits - num_qubits, 2 ** (num_qubits - 1) - num_qubits)
+    total_labels = 4**num_qubits
+
+    if num_terms > total_labels:
+        raise ValueError(
+            f"Requested num_terms={num_terms} exceeds total Pauli strings={total_labels} "
+            f"for N={num_qubits}."
+        )
+
+    rng = np.random.default_rng(seed + num_qubits)
+    picked_indices = rng.choice(total_labels, size=num_terms, replace=False)
+    picked_labels = [_label_from_product_index(int(i), num_qubits) for i in picked_indices]
+    instances = [(PauliAtom(label, phase=1.0), 1.0) for label in picked_labels]
+    return Matrixsum(instances)
+
+
+def build_random_pauli_matrixsum_reference(num_qubits: int, seed: int = 20260314) -> Matrixsum:
+    """Literal notebook implementation. Kept for small-N reproducibility checks."""
+    num_terms = max(num_qubits * num_qubits - num_qubits, 2 ** (num_qubits - 1) - num_qubits)
+    all_labels = ["".join(p) for p in product("IXYZ", repeat=num_qubits)]
+
+    if num_terms > len(all_labels):
+        raise ValueError(
+            f"Requested num_terms={num_terms} exceeds total Pauli strings={len(all_labels)} "
+            f"for N={num_qubits}."
+        )
+
+    rng = np.random.default_rng(seed + num_qubits)
+    idx = rng.choice(len(all_labels), size=num_terms, replace=False)
+    picked_labels = [all_labels[int(i)] for i in idx]
+    instances = [(PauliAtom(label, phase=1.0), 1.0) for label in picked_labels]
+    return Matrixsum(instances)
+
+
+def _compile_matrixsum(
+    ms: Matrixsum,
+    opt: str,
+    basis_gates: tuple[str, ...],
+    optimization_level: int,
+) -> dict[str, int]:
+    be = BlockEncoding(ms)
+    start = time.time()
+    qc = be.circuit(opt=opt)
+    build_time = time.time() - start
+    metrics = _count_metrics(qc, basis_gates=basis_gates, optimization_level=optimization_level)
+    metrics.update(
+        {
+            "tcount": int(getattr(be, "tcount", 0)),
+            "mccount": int(getattr(be, "mccount", 0)),
+            "cxcount": int(getattr(be, "cxcount", 0)),
+            "build_time": float(build_time),
+        }
+    )
+    if opt == "Matrix-order":
+        placement_debug = getattr(be, "placement_search_debug", {})
+        metrics.update(
+            {
+                "placement_cost": int(placement_debug.get("best_cost", -1)),
+                "padding_count": int(placement_debug.get("padding_count", 0)),
+                "refinement_skipped": bool(placement_debug.get("refinement_skipped", False)),
+            }
+        )
+    return metrics
+
+
+def _format_complex(value: complex, precision: int = 6) -> str:
+    value = complex(value)
+    return f"{value.real:.{precision}g}{value.imag:+.{precision}g}j"
+
+
+def describe_matrix_order_controlled_paulis(
+    ms: Matrixsum,
+    max_rows: int | None = None,
+) -> dict[str, object]:
+    """Print high-level controlled-Pauli gates generated by Matrix-order.
+
+    The printed rows are the operations produced by ``mulplex_U_opt_order``
+    before large controlled gates are expanded into CCX/CX primitives.
+    """
+    be = BlockEncoding(ms)
+    qc_u, tcount, mccount, cxcount, ctrl_size = be.mulplex_U_opt_order()
+    g_modes = list(be.mobius_phase_result["g_modes_with_phase"])
+    coeff_dict = getattr(be, "coeff_mode_dict", {})
+
+    print("=== Initial Matrixsum terms ===")
+    print(f"num_terms={ms.length}, sys_size={ms.size}, ctrl_size={ctrl_size}")
+    for term_index, (atom, coeff) in enumerate(ms.instances):
+        pauli_label = getattr(atom, "expr", str(atom))
+        pauli_weight = sum(1 for ch in pauli_label if ch != "I")
+        phase = getattr(atom, "phase", 1.0)
+        print(
+            f"term[{term_index:03d}] pauli={pauli_label} "
+            f"weight={pauli_weight} coeff={_format_complex(coeff)} "
+            f"atom_phase={_format_complex(phase)}"
+        )
+    print("-----------------------------")
+
+    print("=== Matrix-order placement of original terms ===")
+    print(
+        "Convention: ctrl_value is printed left-to-right, but its rightmost bit "
+        "corresponds to ctrl[0] in Qiskit's qubit order."
+    )
+    for pauli_label, ctrl_value in getattr(be, "additional_modes", []):
+        coeff = coeff_dict.get(ctrl_value, 0.0)
+        pauli_weight = sum(1 for ch in pauli_label if ch != "I")
+        source = "original" if abs(complex(coeff)) > 0 else "filler"
+        print(
+            f"place ctrl_value={ctrl_value} pauli={pauli_label} "
+            f"weight={pauli_weight} source={source}"
+        )
+    print("-----------------------------")
+
+    print("=== Matrix-order controlled Pauli operations ===")
+    print(
+        "Convention: ctrl_value is printed left-to-right, but its rightmost bit "
+        "corresponds to ctrl[0] in Qiskit's qubit order."
+    )
+    print(
+        f"ctrl_size={ctrl_size}, qc_u_qubits={qc_u.num_qubits}, "
+        f"selected_k={getattr(be, 'selected_k', 'N/A')}, "
+        f"candidate_costs={getattr(be, 'candidate_costs', 'N/A')}, "
+        f"internal_tcount={tcount}, internal_mccount={mccount}, "
+        f"internal_cxcount={cxcount}"
+    )
+
+    rows = []
+    for gate_index, (pauli_label, ctrl_value, phase) in enumerate(g_modes):
+        active_ctrls = [i for i, bit in enumerate(ctrl_value[::-1]) if bit == "1"]
+        pauli_weight = sum(1 for ch in pauli_label if ch != "I")
+        coeff = coeff_dict.get(ctrl_value, 0.0)
+        row = {
+            "gate_index": gate_index,
+            "ctrl_value": ctrl_value,
+            "active_ctrls": active_ctrls,
+            "num_active_ctrls": len(active_ctrls),
+            "pauli": pauli_label,
+            "pauli_weight": pauli_weight,
+            "phase_pi_over_2": float(phase),
+            "coeff": coeff,
+        }
+        rows.append(row)
+
+    rows_to_print = rows if max_rows is None else rows[:max_rows]
+    for row in rows_to_print:
+        print(
+            f"gate[{row['gate_index']:03d}] "
+            f"ctrl_value={row['ctrl_value']} "
+            f"num_ctrls={row['num_active_ctrls']} "
+            f"pauli={row['pauli']} weight={row['pauli_weight']}"
+        )
+
+    if max_rows is not None and len(rows) > max_rows:
+        print(f"... truncated {len(rows) - max_rows} additional Matrix-order operations")
+    print("-----------------------------")
+    return {
+        "ctrl_size": ctrl_size,
+        "selected_k": getattr(be, "selected_k", None),
+        "candidate_costs": getattr(be, "candidate_costs", None),
+        "internal_counts": {
+            "tcount": int(tcount),
+            "mccount": int(mccount),
+            "cxcount": int(cxcount),
+        },
+        "rows": rows,
+    }
+
+
+def run_random_pauli_case(
+    num_qubits: int,
+    seed: int,
+    opts: tuple[str, ...],
+    basis_gates: tuple[str, ...],
+    optimization_level: int,
+    show_matrix_order_ops: bool = False,
+    matrix_order_ops_limit: int | None = None,
+) -> dict[str, dict[str, int]]:
+    ms = build_random_pauli_matrixsum(num_qubits=num_qubits, seed=seed)
+
+    print(f"=== Random-Pauli Matrixsum metrics for N = {num_qubits} ===")
+    print(
+        f"num_terms={ms.length}, seed={seed}, "
+        f"basis_gates={list(basis_gates)}, opt_level={optimization_level}, "
+        f"implementation={BLOCK_ENCODING_IMPL}"
+    )
+
+    all_metrics = {
+        opt: _compile_matrixsum(
+            ms,
+            opt=opt,
+            basis_gates=basis_gates,
+            optimization_level=optimization_level,
+        )
+        for opt in opts
+    }
+
+    base = all_metrics.get("No")
+    for opt, values in all_metrics.items():
+        if base is None:
+            ratio_text = ""
+        else:
+            ratio_text = (
+                f", depth_ratio={_ratio(values['depth'], base['depth']):.4f}, "
+                f"size_ratio={_ratio(values['size'], base['size']):.4f}, "
+                f"cx_ratio={_ratio(values['cx'], base['cx']):.4f}, "
+                f"u3_ratio={_ratio(values['u3'], base['u3']):.4f}"
+            )
+
+        print(
+            f"({opt}): qubits={values['num_qubits']}, depth={values['depth']}, "
+            f"size={values['size']}, cx={values['cx']}, u3={values['u3']}, "
+            f"tcount={values['tcount']}, mccount={values['mccount']}, "
+            f"cxcount={values['cxcount']}, build_time={values['build_time']:.3f}s"
+            f"{ratio_text}"
+        )
+        if opt == "Matrix-order":
+            print(
+                f"  Matrix-order placement: cost={values.get('placement_cost')}, "
+                f"padding_count={values.get('padding_count')}, "
+                f"refinement_skipped={values.get('refinement_skipped')}"
+            )
+
+    print("-----------------------------")
+    if show_matrix_order_ops:
+        describe_matrix_order_controlled_paulis(ms, max_rows=matrix_order_ops_limit)
+    return all_metrics
+
+
+def export_random_pauli_baseline_openqasm3(
+    num_qubits: int = 4,
+    seed: int = 20260314,
+    out_path: str | Path | None = None,
+) -> dict[str, object]:
+    if out_path is None:
+        out_path = DATA_DIR / f"test_randp_random_pauli_no_n{num_qubits}_baseline.qasm"
+    ms = build_random_pauli_matrixsum(num_qubits=num_qubits, seed=seed)
+    qc = BlockEncoding(ms).circuit(opt="No")
+    return export_openqasm3_baseline(qc, out_path)
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(
+        description=(
+            "Compile the random Pauli Matrixsum benchmark from evaluate.ipynb "
+            "cell f2deabc9 using block_encoding_new.BlockEncoding. The "
+            "Matrix-order option uses the augmented implementation."
+        )
+    )
+    parser.add_argument("--qubits", type=int, nargs="+", default=list(DEFAULT_QUBITS))
+    parser.add_argument("--seed", type=int, default=20260314)
+    parser.add_argument("--opts", nargs="+", default=list(DEFAULT_OPTS), choices=list(DEFAULT_OPTS))
+    parser.add_argument("--basis-gates", nargs="+", default=["cx", "u3"])
+    parser.add_argument("--optimization-level", type=int, default=3, choices=range(4))
+    parser.add_argument(
+        "--show-matrix-order-ops",
+        action="store_true",
+        help="Print Matrix-order controlled-Pauli operations as text.",
+    )
+    parser.add_argument(
+        "--matrix-order-ops-limit",
+        type=int,
+        default=None,
+        help="Maximum number of Matrix-order controlled-Pauli operations to print.",
+    )
+    args = parser.parse_args()
+
+    for num_qubits in args.qubits:
+        run_random_pauli_case(
+            num_qubits=num_qubits,
+            seed=args.seed,
+            opts=tuple(args.opts),
+            basis_gates=tuple(args.basis_gates),
+            optimization_level=args.optimization_level,
+            show_matrix_order_ops=args.show_matrix_order_ops,
+            matrix_order_ops_limit=args.matrix_order_ops_limit,
+        )
+
+
+if __name__ == "__main__":
+    main()

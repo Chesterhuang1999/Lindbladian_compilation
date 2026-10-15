@@ -1,0 +1,1 @@
+../../../../scripts/prepare_random_coloring_dqe_external_baseline_inputs.py

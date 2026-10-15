@@ -18,13 +18,16 @@ from typing import Any
 SCRIPT_DIR = Path(__file__).resolve().parent
 ROOT = SCRIPT_DIR.parents[0]
 SCRIPTS_DIR = ROOT / "scripts"
-for path in (SCRIPT_DIR, SCRIPTS_DIR):
+for path in (SCRIPT_DIR, SCRIPTS_DIR, ROOT / "src"):
     if str(path) not in sys.path:
         sys.path.insert(0, str(path))
 
 
+from experiment_protocol import EXTERNAL_NAM_OPTIMIZERS
+
 DEFAULT_N_POINTS = [4, 8, 12, 20]
-DEFAULT_TOOLS = ["quartz", "wisq", "voqc", "quizx", "feynman", "pytket"]
+DEFAULT_TOOLS = list(EXTERNAL_NAM_OPTIMIZERS)
+AVAILABLE_TOOLS = ["quartz", "wisq", "voqc", "quizx", "feynman", "pytket"]
 INPUT_DIR = ROOT / "circuits" / "hypercubeW"
 RESULT_DIR = ROOT / "Baseline_results" / "hypercubeW"
 
@@ -121,7 +124,7 @@ def build_tasks(args: argparse.Namespace) -> list[Task]:
 
     for n in args.n:
         for tool in args.tools:
-            if tool not in DEFAULT_TOOLS:
+            if tool not in AVAILABLE_TOOLS:
                 raise ValueError(f"Unknown tool: {tool}")
             gate_set = input_gate_set_for_tool(args, tool)
             input_path = input_path_for_n(int(n), input_dir, gate_set=gate_set).resolve()
@@ -278,7 +281,7 @@ def build_parser() -> argparse.ArgumentParser:
         )
     )
     parser.add_argument("--n", nargs="+", type=int, default=DEFAULT_N_POINTS)
-    parser.add_argument("--tools", nargs="+", default=DEFAULT_TOOLS, choices=DEFAULT_TOOLS)
+    parser.add_argument("--tools", nargs="+", default=DEFAULT_TOOLS, choices=AVAILABLE_TOOLS)
     parser.add_argument("--input-dir", default=str(INPUT_DIR))
     parser.add_argument("--result-dir", default=str(RESULT_DIR))
     parser.add_argument("--generate-inputs", action="store_true")

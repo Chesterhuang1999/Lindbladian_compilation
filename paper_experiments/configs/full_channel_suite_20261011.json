@@ -1,0 +1,633 @@
+{
+  "schema_version": 1,
+  "selection_date": "2026-10-11",
+  "scope": "Selected inputs for subsequent complete channel compilation; this file is a selection, not completed measurements.",
+  "routes": "Existing routes only; no new baseline integration.",
+  "settings_source": "src/experiment_protocol.py",
+  "matrix_order_source": "src/matrix_order_pipeline.py",
+  "required_case_groups": 39,
+  "optional_case_groups": 1,
+  "required_instances_with_five_random_seeds": 51,
+  "selected_instances_with_five_random_seeds": 52,
+  "reporting": {
+    "date": "2026-10-15",
+    "table_rows": 40,
+    "rows_per_partition": 20,
+    "random_groups": [
+      "Random-5K-4q-10-2",
+      "RandCh-N9-8q",
+      "RandCh-N15-12q"
+    ],
+    "random_aggregation": "Arithmetic mean of each metric over all five seeds (0-4); no success-only averages. Preserve per-seed status and standard deviation.",
+    "output_basis": [
+      "u1",
+      "u2",
+      "u3",
+      "cx"
+    ],
+    "ours_additional_output_basis": [
+      "rz",
+      "h",
+      "x",
+      "cx"
+    ],
+    "methods": [
+      "Raw (IBM opt0)",
+      "Raw + Qiskit (IBM opt3)",
+      "Ours (NAM opt0 and IBM opt0)"
+    ],
+    "metrics": [
+      "subnormalization_factor",
+      "gate_count",
+      "total_qubit_width",
+      "compilation_time_s"
+    ],
+    "raw_policy": "Optimize existing successful Raw inputs only; retain previous failed/deferred Raw instances without regeneration.",
+    "batch": "paper_experiments/pending_review/full_ibm_tables_20261015"
+  },
+  "selection_revision": {
+    "date": "2026-10-15",
+    "removed_cases": [
+      "Toom-L8"
+    ],
+    "added_case_groups": [
+      "HRW-8",
+      "Random-5K-4q-10-2"
+    ],
+    "excluded_supplemental_case_groups": [
+      "TFIM-2",
+      "TFIM-3",
+      "Petz_Ising3",
+      "CPTP2_M3",
+      "CPTP2_M4"
+    ],
+    "reason": "User retained two benchmark partitions, added HRW-8 and all five existing Random-5K-4q-10-2 seeds, and excluded other supplemental full-channel instances. Toom-L8 remains excluded. Preserve historical outputs, frozen snapshots and independent RQ3 workloads.",
+    "raw_incomplete_policy": "Retain recorded failures and deferred cases; do not rerun missing Raw benchmarks."
+  },
+  "benchmark_partitions": [
+    {
+      "id": "lindbladian_derived",
+      "label": "Lindbladian-derived channels",
+      "case_group_ids": [
+        "TFIM-4",
+        "TFIM-8",
+        "TFIM-12",
+        "TFIM-20",
+        "TFIM-32",
+        "TFIM-40",
+        "TFIM-54",
+        "TFIM-60",
+        "Toom-L3",
+        "Toom-L4",
+        "Toom-L6",
+        "GC-4x4",
+        "GC-4x6",
+        "GC-bd3-24",
+        "Decay-HO",
+        "TFIM2-HO",
+        "TFIM3_HO",
+        "Collective4",
+        "Local_QSW3",
+        "Thermal2_HO"
+      ],
+      "selected_instances": 20,
+      "required_instances": 19,
+      "optional_instances": 1
+    },
+    {
+      "id": "algorithm_derived_and_random",
+      "label": "Algorithm-derived + random channels",
+      "case_group_ids": [
+        "HRW-4",
+        "HRW-8",
+        "HRW-12",
+        "HRW-20",
+        "HRW-28",
+        "HRW-48",
+        "HRW-60",
+        "HRW-128",
+        "HRW-256",
+        "HRW-512",
+        "HRW-1024",
+        "HRW-1440",
+        "Color-n4q4-linear",
+        "Color-n4q4-cycle",
+        "RepDQE-d3",
+        "RepDQE-d5",
+        "Petz_TFIM2",
+        "RandCh-N9-8q",
+        "RandCh-N15-12q",
+        "Random-5K-4q-10-2"
+      ],
+      "selected_instances": 32,
+      "required_instances": 32,
+      "optional_instances": 0
+    }
+  ],
+  "cases": [
+    {
+      "id": "TFIM-4",
+      "family": "tfim_first_order",
+      "system_qubits": 4,
+      "placement": "main",
+      "parameters": {
+        "delta_t": 0.1
+      }
+    },
+    {
+      "id": "TFIM-8",
+      "family": "tfim_first_order",
+      "system_qubits": 8,
+      "placement": "appendix",
+      "parameters": {
+        "delta_t": 0.1
+      }
+    },
+    {
+      "id": "TFIM-12",
+      "family": "tfim_first_order",
+      "system_qubits": 12,
+      "placement": "main",
+      "parameters": {
+        "delta_t": 0.1
+      }
+    },
+    {
+      "id": "TFIM-20",
+      "family": "tfim_first_order",
+      "system_qubits": 20,
+      "placement": "main",
+      "parameters": {
+        "delta_t": 0.1
+      }
+    },
+    {
+      "id": "TFIM-32",
+      "family": "tfim_first_order",
+      "system_qubits": 32,
+      "placement": "appendix",
+      "parameters": {
+        "delta_t": 0.1
+      }
+    },
+    {
+      "id": "TFIM-40",
+      "family": "tfim_first_order",
+      "system_qubits": 40,
+      "placement": "appendix",
+      "parameters": {
+        "delta_t": 0.1
+      }
+    },
+    {
+      "id": "TFIM-54",
+      "family": "tfim_first_order",
+      "system_qubits": 54,
+      "placement": "appendix",
+      "parameters": {
+        "delta_t": 0.1
+      }
+    },
+    {
+      "id": "TFIM-60",
+      "family": "tfim_first_order",
+      "system_qubits": 60,
+      "placement": "main",
+      "parameters": {
+        "delta_t": 0.1
+      }
+    },
+    {
+      "id": "HRW-4",
+      "family": "hrw",
+      "system_qubits": 4,
+      "rewrite_options": {
+        "rewrite_method": "rewrite_search",
+        "strategy": "greedy_incremental",
+        "max_steps": 50
+      },
+      "placement": "appendix"
+    },
+    {
+      "id": "HRW-8",
+      "family": "hrw",
+      "system_qubits": 8,
+      "rewrite_options": {
+        "rewrite_method": "rewrite_search",
+        "strategy": "greedy_incremental",
+        "max_steps": 50
+      },
+      "placement": "undecided"
+    },
+    {
+      "id": "HRW-12",
+      "family": "hrw",
+      "system_qubits": 12,
+      "rewrite_options": {
+        "rewrite_method": "rewrite_search",
+        "strategy": "greedy_incremental",
+        "max_steps": 50
+      },
+      "placement": "main"
+    },
+    {
+      "id": "HRW-20",
+      "family": "hrw",
+      "system_qubits": 20,
+      "rewrite_options": {
+        "rewrite_method": "rewrite_search",
+        "strategy": "greedy_incremental",
+        "max_steps": 50
+      },
+      "placement": "main"
+    },
+    {
+      "id": "HRW-28",
+      "family": "hrw",
+      "system_qubits": 28,
+      "rewrite_options": {
+        "rewrite_method": "rewrite_search",
+        "strategy": "greedy_incremental",
+        "max_steps": 50
+      },
+      "placement": "main"
+    },
+    {
+      "id": "HRW-48",
+      "family": "hrw",
+      "system_qubits": 48,
+      "rewrite_options": {
+        "rewrite_method": "rewrite_search",
+        "strategy": "greedy_incremental",
+        "max_steps": 50
+      },
+      "placement": "main"
+    },
+    {
+      "id": "HRW-60",
+      "family": "hrw",
+      "system_qubits": 60,
+      "rewrite_options": {
+        "rewrite_method": "rewrite_search",
+        "strategy": "greedy_incremental",
+        "max_steps": 61
+      },
+      "placement": "main"
+    },
+    {
+      "id": "HRW-128",
+      "family": "hrw",
+      "system_qubits": 128,
+      "rewrite_options": {
+        "rewrite_method": "rewrite_search",
+        "strategy": "greedy_incremental",
+        "max_steps": 129
+      },
+      "placement": "main"
+    },
+    {
+      "id": "HRW-256",
+      "family": "hrw",
+      "system_qubits": 256,
+      "rewrite_options": {
+        "rewrite_method": "rewrite_search",
+        "strategy": "greedy_incremental",
+        "max_steps": 257
+      },
+      "placement": "appendix"
+    },
+    {
+      "id": "HRW-512",
+      "family": "hrw",
+      "system_qubits": 512,
+      "rewrite_options": {
+        "rewrite_method": "rewrite_search",
+        "strategy": "greedy_incremental",
+        "max_steps": 513
+      },
+      "placement": "appendix"
+    },
+    {
+      "id": "HRW-1024",
+      "family": "hrw",
+      "system_qubits": 1024,
+      "rewrite_options": {
+        "rewrite_method": "rewrite_search",
+        "strategy": "greedy_incremental",
+        "max_steps": 1025
+      },
+      "placement": "appendix"
+    },
+    {
+      "id": "HRW-1440",
+      "family": "hrw",
+      "system_qubits": 1440,
+      "rewrite_options": {
+        "rewrite_method": "rewrite_search",
+        "strategy": "greedy_incremental",
+        "max_steps": 1441
+      },
+      "placement": "main"
+    },
+    {
+      "id": "Toom-L3",
+      "family": "toom",
+      "system_qubits": 9,
+      "placement": "undecided",
+      "optional": false,
+      "parameters": {
+        "L": 3,
+        "gamma": 0.1,
+        "delta_t": 0.1
+      }
+    },
+    {
+      "id": "Toom-L4",
+      "family": "toom",
+      "system_qubits": 16,
+      "placement": "undecided",
+      "optional": false,
+      "parameters": {
+        "L": 4,
+        "gamma": 0.1,
+        "delta_t": 0.1
+      }
+    },
+    {
+      "id": "Toom-L6",
+      "family": "toom",
+      "system_qubits": 36,
+      "placement": "undecided",
+      "optional": true,
+      "parameters": {
+        "L": 6,
+        "gamma": 0.1,
+        "delta_t": 0.1
+      }
+    },
+    {
+      "id": "GC-4x4",
+      "family": "graph_cluster_grid",
+      "system_qubits": 16,
+      "placement": "undecided",
+      "parameters": {
+        "rows": 4,
+        "columns": 4,
+        "gamma": 0.1,
+        "delta_t": 0.1
+      }
+    },
+    {
+      "id": "GC-4x6",
+      "family": "graph_cluster_grid",
+      "system_qubits": 24,
+      "placement": "undecided",
+      "parameters": {
+        "rows": 4,
+        "columns": 6,
+        "gamma": 0.1,
+        "delta_t": 0.1
+      }
+    },
+    {
+      "id": "GC-bd3-24",
+      "family": "graph_cluster_random",
+      "system_qubits": 24,
+      "placement": "undecided",
+      "parameters": {
+        "max_degree": 3,
+        "seed": 7,
+        "gamma": 0.1,
+        "delta_t": 0.1
+      }
+    },
+    {
+      "id": "Color-n4q4-linear",
+      "family": "random_coloring",
+      "system_qubits": 8,
+      "placement": "undecided",
+      "parameters": {
+        "num_vertices": 4,
+        "colors": 4,
+        "graph": "linear",
+        "color_mixing_preprocess": false
+      }
+    },
+    {
+      "id": "Color-n4q4-cycle",
+      "family": "random_coloring",
+      "system_qubits": 8,
+      "placement": "undecided",
+      "parameters": {
+        "num_vertices": 4,
+        "colors": 4,
+        "graph": "cycle",
+        "color_mixing_preprocess": false
+      }
+    },
+    {
+      "id": "RepDQE-d3",
+      "family": "repetition_dqe",
+      "system_qubits": 3,
+      "placement": "undecided",
+      "parameters": {
+        "d": 3,
+        "epsilon": 0.25,
+        "symmetrized": false
+      }
+    },
+    {
+      "id": "RepDQE-d5",
+      "family": "repetition_dqe",
+      "system_qubits": 5,
+      "placement": "undecided",
+      "parameters": {
+        "d": 5,
+        "epsilon": 0.25,
+        "symmetrized": false
+      }
+    },
+    {
+      "id": "Decay-HO",
+      "family": "decay_higher_order",
+      "system_qubits": 1,
+      "placement": "undecided",
+      "parameters": {
+        "lambda": 1,
+        "v": 0.5,
+        "scaling": 4.01,
+        "total_time": 0.1,
+        "K": 2,
+        "q": 4,
+        "K1": 4
+      }
+    },
+    {
+      "id": "TFIM2-HO",
+      "family": "tfim_higher_order_legacy",
+      "system_qubits": 2,
+      "placement": "undecided",
+      "parameters": {
+        "delta_t": 0.1,
+        "K": 2,
+        "q": 4,
+        "K1": 4
+      }
+    },
+    {
+      "id": "TFIM3_HO",
+      "family": "new_benchmark_fixture",
+      "system_qubits": 3,
+      "placement": "undecided",
+      "fixture": "paper_experiments/experiments_new/fixture_benchmarks/inputs/TFIM3_HO.json"
+    },
+    {
+      "id": "Petz_TFIM2",
+      "family": "new_benchmark_fixture",
+      "system_qubits": 2,
+      "placement": "undecided",
+      "fixture": "paper_experiments/experiments_new/fixture_benchmarks/inputs/Petz_TFIM2.json"
+    },
+    {
+      "id": "Collective4",
+      "family": "new_benchmark_fixture",
+      "system_qubits": 4,
+      "placement": "undecided",
+      "fixture": "paper_experiments/experiments_new/fixture_benchmarks/inputs/Collective4.json"
+    },
+    {
+      "id": "Local_QSW3",
+      "family": "new_benchmark_fixture",
+      "system_qubits": 3,
+      "placement": "undecided",
+      "fixture": "paper_experiments/experiments_new/fixture_benchmarks/inputs/Local_QSW3.json"
+    },
+    {
+      "id": "Thermal2_HO",
+      "family": "new_benchmark_fixture",
+      "system_qubits": 2,
+      "placement": "undecided",
+      "fixture": "paper_experiments/experiments_new/fixture_benchmarks/inputs/Thermal2_HO.json"
+    },
+    {
+      "id": "RandCh-N9-8q",
+      "family": "random_pauli_kraus_channel",
+      "system_qubits": 8,
+      "placement": "undecided",
+      "parameters": {
+        "kraus_count": 9,
+        "num_qubits": 8,
+        "first_kraus_terms": 20,
+        "other_kraus_terms": 4,
+        "seeds": [
+          0,
+          1,
+          2,
+          3,
+          4
+        ]
+      },
+      "seed_policy": "Retain the existing five-seed protocol; new N15 uses the same seed indices."
+    },
+    {
+      "id": "RandCh-N15-12q",
+      "family": "random_pauli_kraus_channel",
+      "system_qubits": 12,
+      "placement": "undecided",
+      "parameters": {
+        "kraus_count": 15,
+        "num_qubits": 12,
+        "first_kraus_terms": 40,
+        "other_kraus_terms": 8,
+        "seeds": [
+          0,
+          1,
+          2,
+          3,
+          4
+        ]
+      },
+      "seed_policy": "Retain the existing five-seed protocol; new N15 uses the same seed indices."
+    },
+    {
+      "id": "Random-5K-4q-10-2",
+      "family": "random_pauli_kraus_channel",
+      "system_qubits": 4,
+      "placement": "undecided",
+      "parameters": {
+        "kraus_count": 5,
+        "num_qubits": 4,
+        "first_kraus_terms": 10,
+        "other_kraus_terms": 2,
+        "seeds": [
+          0,
+          1,
+          2,
+          3,
+          4
+        ]
+      },
+      "seed_policy": "Reuse all five existing RQ2 seeds, with the identical generator and input parameters.",
+      "existing_results": "paper_experiments/pending_review/rq2_hybrid_ablation_20261014"
+    }
+  ],
+  "execution": {
+    "host_selection": "local",
+    "host_selection_evidence": "paper_experiments/pending_review/host_timing_probe_20261011/comparison.json",
+    "remote_snapshot": "/pub/data/huangqf/Lindbladian_compilation/evaluation_20261011_current",
+    "probe": {
+      "cases": [
+        "TFIM-4",
+        "HRW-4"
+      ],
+      "warmups": 1,
+      "repetitions": 5,
+      "numerical_threads": 1,
+      "metric": "median compiler wall time; imports, input loading, verification and I/O excluded",
+      "local_medians_s": [
+        0.32038529217243195,
+        0.1218289160169661
+      ],
+      "remote_medians_s": [
+        0.5529107190668583,
+        0.2368549033999443
+      ]
+    },
+    "formal_suite_started": true,
+    "started_scope": "TFIM first-order (8) and HRW (11) completed; two higher-order TFIM attempts exited -9. Remaining required instances (24) and conditional Toom L6/L8 (2) scheduled separately.",
+    "active_run_manifest": "paper_experiments/pending_review/tfim_hrw_full_20261011/manifest.json",
+    "active_run_status": "paper_experiments/pending_review/tfim_hrw_full_20261011/status.json",
+    "remaining_run_manifest": "paper_experiments/pending_review/remaining_full_20261011/manifest.json",
+    "remaining_run_status": "paper_experiments/pending_review/remaining_full_20261011/status.json",
+    "remaining_execution_policy": {
+      "pipeline": "Ours",
+      "rewrite": "static gate-cost beam, width 8, max_steps 50; no automatic fallback",
+      "memory_limit_gib": 6,
+      "required_case_wall_timeout_s": null,
+      "optional_case_wall_timeout_s": 3600,
+      "optional_dependencies": {
+        "Toom-L6": "Toom-L4"
+      },
+      "random_seeds": [
+        0,
+        1,
+        2,
+        3,
+        4
+      ],
+      "numerical_threads": 1,
+      "parallel_cases": 1
+    },
+    "large_hrw_rewrite_policy": {
+      "objective": "total_pauli_support",
+      "strategy": "greedy_incremental",
+      "scope": "HRW cases only; other families retain the static gate-cost beam defaults",
+      "max_steps_rule": "max(50, system_qubits + 1); allow a no-improvement check after the expected n pair rewrites",
+      "required_termination": "no_improvement; max_steps_reached must be reported as truncated",
+      "cost_audit_model": "H_length_static_nc_v1",
+      "lowering": "tree + F* + updated Matrix-order, NAM opt0",
+      "evidence": "paper_experiments/pending_review/hrw28_rewrite_policy_20261011/comparison.json",
+      "validation_scope": "HRW-28 measured in this probe; other selected sizes require their own validation during the formal suite"
+    }
+  }
+}

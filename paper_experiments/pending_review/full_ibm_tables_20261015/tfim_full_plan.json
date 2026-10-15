@@ -1,0 +1,30 @@
+{
+  "cases": [
+    "TFIM-40",
+    "TFIM-4",
+    "TFIM-8",
+    "TFIM-12",
+    "TFIM-20"
+  ],
+  "workers": {
+    "tfim_full_worker.py": "2240eb36ddf5539008a7106c6e0710ec86f29b936569bb182570b4c9813c2d48",
+    "tfim_raw_full_worker.py": "dfec3a9716b28f3e0b430a78dc0cc7794f9a4ffb785db9f7e426900eaae89f66"
+  },
+  "input_sha256": {
+    "TFIM-40": "fb54d7b6605c3179b209f340eac4293b63753fbc2c6fd8cde247cd7731660756",
+    "TFIM-4": "4804692a94f53f40a44f02a6ca68d224fe230edc102d2f88c5dc777a670decde",
+    "TFIM-8": "1d8c5954c6b2c37611669faad324435249e8f78d54d2ff5e5e8ff95d7435e2ac",
+    "TFIM-12": "bee9595085fbc23b588cffe0a628ecc9e6c1369b5159fb10b39dd8f83c25aaaa",
+    "TFIM-20": "3f0a06906ca02d29492a44b16d79c329f661490967bcfe987028d3a6b06adfce"
+  },
+  "jobs": {
+    "TFIM-40": "Ours fresh full pipeline",
+    "TFIM-4": "Raw fresh full pipeline followed by opt3",
+    "TFIM-8": "Raw fresh full pipeline followed by opt3",
+    "TFIM-12": "Raw fresh full pipeline followed by opt3",
+    "TFIM-20": "Raw fresh full pipeline followed by opt3"
+  },
+  "frozen_manifest_sha256": "62dbfdfb0d2ec80b6e2e9a2590dadbdcd35dcbff40e74d9b2cf8496563972f5e",
+  "scheduling": "max four concurrent, Ours 8 GiB, Raw+opt3 32 GiB, aggregate 104 GiB, min available 32 GiB; 12h stages and 24h workers",
+  "historical_timing_reused": false
+}

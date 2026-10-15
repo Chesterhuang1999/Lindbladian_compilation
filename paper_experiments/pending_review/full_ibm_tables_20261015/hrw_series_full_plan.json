@@ -1,0 +1,41 @@
+{
+  "cases": [
+    "HRW-4",
+    "HRW-8",
+    "HRW-12",
+    "HRW-20",
+    "HRW-28",
+    "HRW-48",
+    "HRW-60",
+    "HRW-128",
+    "HRW-256",
+    "HRW-512"
+  ],
+  "worker_sha256": "2dcb0fdf4720caa8761db328af44bcd43ec27dea4c5c12c040630da95af6a3f1",
+  "scheduler_sha256": "9df9476660e7d243acf5684be98c101d4e024490c6643607b8ab520e48743257",
+  "input_sha256": {
+    "HRW-4": "df85ae63a289335f43b92215d10052fbc325d63f5954d0a4a4c0f77237afd31f",
+    "HRW-8": "2ebd72871aac77452a36ddda9a233ea9e3390d2c31221244008e8d0509785ca0",
+    "HRW-12": "8b1354e92f0803195f6800d007c42033498a1ede0bd514b14c84ef78decaf896",
+    "HRW-20": "27bf179647b9581840a6996b8a40e98a2681cab11e3335276d60aa6aca0d1216",
+    "HRW-28": "e1bbaa76cf406b6aec3a5eaeb874b28ca1f7f4f2f1e94d26d1ae945ccfceb598",
+    "HRW-48": "747139e2fc7f7a72bad4995b59e8d27fd2405eb93d0491d1f9543695cde8c892",
+    "HRW-60": "79206c80857beb38200ad26265f4c5a54edc8a1b9f3bea0261908568f8dda49f",
+    "HRW-128": "8419b66c810adac35118b5e356c4dba728ef35e61ada51995ed46d8c6c3e2409",
+    "HRW-256": "1c3746e07ef8a9987cb7ef60865982cf2e08177a9be20c94f7c51c945d40a8f9",
+    "HRW-512": "069b87b2303e23e2c9a3bf87b3c22f2ea059ef8319e795cc0ffb8064e6919bba"
+  },
+  "frozen_manifest_sha256": "62dbfdfb0d2ec80b6e2e9a2590dadbdcd35dcbff40e74d9b2cf8496563972f5e",
+  "dependency": "remote_tfim_full_status.json: all five jobs terminated",
+  "output_kind": "ours_full_remote_series",
+  "scope": "Fresh remote canonicalization, rewrite, assembly and IBM lowering for all ten cases, including repeat measurements of HRW-4/12/20; no archived rewrite or timing reused",
+  "policy": {
+    "max_workers": 1,
+    "large_worker_rss_gib": 128,
+    "small_worker_rss_gib": 8,
+    "aggregate_rss_gib": 128,
+    "minimum_available_gib": 32,
+    "stage_timeout_s": 43200,
+    "worker_timeout_s": 86400
+  }
+}

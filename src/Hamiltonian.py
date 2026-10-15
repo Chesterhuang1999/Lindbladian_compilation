@@ -279,4 +279,3 @@ if __name__ == "__main__":
 
     # print(f"Checked {total_cases} cases over all 2-bit Pauli pairs.")
     # print(f"Erroneous cases (err > {err_th}): {erroneous_cases}")
-

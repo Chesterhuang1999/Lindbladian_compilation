@@ -16,7 +16,7 @@ from pathlib import Path
 from typing import Any
 
 import numpy as np
-from qiskit import qasm2, transpile
+from qiskit import qasm2
 from qiskit.circuit import QuantumCircuit
 
 
@@ -29,10 +29,12 @@ if str(BASELINE_DIR) not in sys.path:
     sys.path.insert(0, str(BASELINE_DIR))
 
 from baseline_common import count_qasm_file  # type: ignore  # noqa: E402
-from block_encoding_new import BlockEncoding as NewBlockEncoding  # type: ignore  # noqa: E402
+from block_encoding import BlockEncoding as NewBlockEncoding  # type: ignore  # noqa: E402
 from channel_IR import Matrixsum, PauliAtom, channel as ChannelIR, channel_ensemble  # type: ignore  # noqa: E402
 import channel_LCU  # type: ignore  # noqa: E402
 from qasm_export import export_openqasm2_quartz_input  # type: ignore  # noqa: E402
+
+from experiment_protocol import transpile_channel_circuit as transpile
 
 
 NAM_BASIS = ("h", "x", "rz", "cx")
@@ -597,24 +599,9 @@ def build_channel_lcu_circuit(
 
 
 def build_single_kraus_matrix_order_circuit(kraus_ops: list[Matrixsum]) -> tuple[QuantumCircuit, Any, float]:
-    started = time.perf_counter()
     if len(kraus_ops) != 1:
-        raise ValueError("single-Kraus builder requires exactly one Kraus operator.")
-
-    sys_size = kraus_ops[0].size
-    if len(kraus_ops[0].instances) == 1:
-        inst, coeff = kraus_ops[0].instances[0]
-        if isinstance(inst, PauliAtom) and abs(coeff - 1.0) <= 1e-12:
-            qc = QuantumCircuit(sys_size)
-            elapsed = time.perf_counter() - started
-            return qc, [[], [], [], list(range(sys_size))], elapsed
-
-    block = NewBlockEncoding(copy.deepcopy(kraus_ops[0])).circuit(opt="No")
-    ctrl_size = block.num_qubits - sys_size
-    qc = QuantumCircuit(ctrl_size + sys_size)
-    qc.compose(block, qubits=range(ctrl_size + sys_size), inplace=True)
-    elapsed = time.perf_counter() - started
-    return qc, [[], [], list(range(ctrl_size)), list(range(ctrl_size, ctrl_size + sys_size))], elapsed
+        raise ValueError("single-Kraus builder requires exactly one Kraus operator")
+    return build_rewrite_opt_matrix_order_circuit(kraus_ops)
 
 
 def compact_matrix_order_block_metadata(
@@ -652,48 +639,15 @@ def compact_matrix_order_block_metadata(
 def build_rewrite_opt_matrix_order_circuit(
     kraus_ops: list[Matrixsum],
 ) -> tuple[QuantumCircuit, Any, float]:
-    if len(kraus_ops) == 1:
-        return build_single_kraus_matrix_order_circuit(kraus_ops)
+    """Use the shared corrected backend and explicit tree outer selection."""
+    from channel_IR import channel_ensemble
+    import channel_LCU
 
     started = time.perf_counter()
-    sys_size = max(ms.size for ms in kraus_ops)
-    select_size = int(np.ceil(np.log2(len(kraus_ops))))
-    coeff_sums = [ms.pauli_norm() for ms in kraus_ops]
-
-    lcu_ini = channel_LCU.prep_sup_state(coeff_sums)
-    circuits = []
-    matrix_order_blocks = []
-    for index, ms in enumerate(kraus_ops):
-        block_encoding = NewBlockEncoding(copy.deepcopy(ms))
-        circuit = block_encoding.circuit(opt="Matrix-order")
-        circuits.append(circuit)
-        matrix_order_blocks.append(
-            compact_matrix_order_block_metadata(index, ms, block_encoding, circuit)
-        )
-    ctrl_size = max(circ.num_qubits - sys_size for circ in circuits)
-
-    qc = QuantumCircuit(2 * select_size + ctrl_size + sys_size)
-    select_indexes = [2 * j for j in range(select_size)]
-    anc_indexes = [2 * j + 1 for j in range(select_size)]
-    ctrl_indexes = list(range(2 * select_size, 2 * select_size + ctrl_size))
-    sys_indexes = list(range(2 * select_size + ctrl_size, 2 * select_size + ctrl_size + sys_size))
-
-    qc.compose(lcu_ini, qubits=select_indexes, inplace=True)
-    qc, _tcount, _mccount, _cxcount = channel_LCU.mulplex_U_opt(
-        qc,
-        circuits,
-        select_size,
-        ctrl_size,
-        sys_size,
+    qc, qubit_indexes = channel_LCU.channel_to_LCU(
+        channel_ensemble([copy.deepcopy(kraus_ops)]), structure="tree", opt="Matrix-order",
     )
-    qc.metadata = {
-        "matrix_order_blocks": matrix_order_blocks,
-        "select_size": int(select_size),
-        "ctrl_size": int(ctrl_size),
-        "system_qubits": int(sys_size),
-    }
-    elapsed = time.perf_counter() - started
-    return qc, [select_indexes, anc_indexes, ctrl_indexes, sys_indexes], elapsed
+    return qc, qubit_indexes, time.perf_counter() - started
 
 
 def _raw_circuit_worker(conn: Any, kraus_ops: list[Matrixsum], structure: str, opt: str) -> None:
@@ -997,7 +951,7 @@ def run_case(args: argparse.Namespace, case: CaseSpec) -> dict[str, Any]:
             ours_times[gate_set] = elapsed
             rows.append(
                 row_from_stats(
-                    "Ours-only (rewrite + opt + matrix-order)",
+                    "Ours-only (rewrite + tree + matrix-order)",
                     gate_set,
                     stats,
                     rewrite_time + ours_build_time + elapsed,
@@ -1039,7 +993,9 @@ def run_case(args: argparse.Namespace, case: CaseSpec) -> dict[str, Any]:
                 "termination": rewrite_result.get("termination", {}),
             },
             "ours": {
-                "structure": "opt",
+                "structure": "tree",
+                "block_backend": "block_encoding.BlockEncoding",
+                "qubits_initially_zero": False,
                 "opt": "Matrix-order",
                 "build_time_s": float(ours_build_time),
                 "qasm": str(ours_qasm),
@@ -1211,7 +1167,7 @@ def run_case(args: argparse.Namespace, case: CaseSpec) -> dict[str, Any]:
         }
         rows.append(
             row_from_stats(
-                "Ours (rewrite + opt + matrix-order)",
+                "Ours (rewrite + tree + matrix-order)",
                 gate_set,
                 stats,
                 rewrite_time + ours_build_time + elapsed,
@@ -1257,7 +1213,9 @@ def run_case(args: argparse.Namespace, case: CaseSpec) -> dict[str, Any]:
             "termination": rewrite_result.get("termination", {}),
         },
         "ours": {
-            "structure": "opt",
+            "structure": "tree",
+            "block_backend": "block_encoding.BlockEncoding",
+            "qubits_initially_zero": False,
             "opt": "Matrix-order",
             "build_time_s": float(ours_build_time),
             "qasm": str(ours_qasm),
@@ -1289,7 +1247,7 @@ def parse_int_list(values: list[str]) -> list[int]:
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Run q-color random-coloring channel-LCU rewrite+opt+matrix-order statistics in NAM and IBM bases."
+        description="Run q-color random-coloring channel-LCU rewrite+tree+matrix-order statistics in NAM and IBM bases."
     )
     parser.add_argument("--num-vertices", nargs="+", default=["4", "8"], help="Vertex counts; default: 4 8.")
     parser.add_argument("--q", type=int, default=None, help="Number of colors. Default: q=n for each case.")
@@ -1319,7 +1277,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--ours-only",
         action="store_true",
-        help="Skip raw channel-LCU synthesis and directly build the rewrite+opt+Matrix-order circuit.",
+        help="Skip raw channel-LCU synthesis and directly build the rewrite+tree+Matrix-order circuit.",
     )
     parser.add_argument(
         "--color-mixing-preprocess",

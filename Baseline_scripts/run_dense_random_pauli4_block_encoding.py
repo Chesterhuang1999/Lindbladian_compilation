@@ -9,7 +9,7 @@ By default, coefficients are positive random values normalized to L1 norm 1.
 Use ``--coeff-mode uniform`` to reproduce the earlier equal-coefficient run.
 
 Both tools receive the same Matrixsum.  Ours uses the current
-``block_encoding_new.BlockEncoding.circuit(opt="Matrix-order")`` path, while
+``block_encoding.BlockEncoding.circuit(opt="Matrix-order")`` path, while
 Qrisp uses legal ``BlockEncoding.from_lcu`` input: nonnegative coefficients
 and phase-bearing Pauli unitaries.
 """
@@ -296,7 +296,7 @@ def write_report(summary: dict[str, Any], path: Path) -> None:
         "- The 256-term full case is the complete 4-qubit Pauli group including identity, with seeded coefficients.",
         f"- coefficient mode: `{summary['arguments']['coeff_mode']}`.",
         "- For `random-positive`, coefficients are sampled as `c_i ~ Uniform(0, 1)` and L1-normalized to `sum_i c_i = 1`.",
-        "- Ours uses current `block_encoding_new.BlockEncoding.circuit(opt=\"Matrix-order\")`; Qrisp uses legal nonnegative `from_lcu` input.",
+        "- Ours uses current `block_encoding.BlockEncoding.circuit(opt=\"Matrix-order\")`; Qrisp uses legal nonnegative `from_lcu` input.",
         "",
         markdown_table(
             [

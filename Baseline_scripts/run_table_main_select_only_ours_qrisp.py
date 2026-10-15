@@ -5,7 +5,7 @@ This runner removes PREPARE/PREPARE-dagger from every example in the main
 Ours/Qrisp block-encoding table.  The comparison target is only the SELECT
 oracle:
 
-* Ours: current ``block_encoding_new.BlockEncoding.mulplex_U_opt_order()``
+* Ours: current ``block_encoding.BlockEncoding.mulplex_U_opt_order()``
   followed by the same large-controlled-gate lowering used by the full
   block-encoding path.
 * Qrisp: direct ``q_switch(index, unitaries, system)`` using the same
@@ -32,7 +32,7 @@ for candidate in (ROOT / "src", ROOT / "scripts", ROOT / "Baseline_scripts"):
     if str(candidate) not in sys.path:
         sys.path.insert(0, str(candidate))
 
-from block_encoding_new import (  # type: ignore  # noqa: E402
+from block_encoding import (  # type: ignore  # noqa: E402
     BlockEncoding as CurrentBlockEncoding,
     expand_large_controlled_gates,
 )
@@ -1009,7 +1009,7 @@ def main() -> None:
         "arguments": vars(args),
         "policy": {
             "scope": "SELECT only for every example; no coefficient state preparation",
-            "ours": "block_encoding_new.BlockEncoding.mulplex_U_opt_order + expand_large_controlled_gates",
+            "ours": "block_encoding.BlockEncoding.mulplex_U_opt_order + expand_large_controlled_gates",
             "qrisp": "qrisp.jasp.q_switch with phase-bearing Pauli unitaries",
         },
         "rewritten_kraus": {"cases": []},

@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Rerun Qrisp comparisons with the current ``block_encoding_new.BlockEncoding``.
+"""Rerun Qrisp comparisons with the current ``block_encoding.BlockEncoding``.
 
 This runner intentionally avoids ``ForcedWNewBlockEncoding``.  The in-house
-path directly instantiates the current ``block_encoding_new.BlockEncoding`` and
+path directly instantiates the current ``block_encoding.BlockEncoding`` and
 builds the complete ``circuit(opt="Matrix-order")`` block encoding:
 
     PREPARE(coefficients) -> matrix-order SELECT -> PREPARE(coefficients)^dag
@@ -27,7 +27,7 @@ for candidate in (ROOT / "src", ROOT / "scripts", ROOT / "Baseline_scripts"):
     if str(candidate) not in sys.path:
         sys.path.insert(0, str(candidate))
 
-from block_encoding_new import BlockEncoding as CurrentBlockEncoding  # type: ignore  # noqa: E402
+from block_encoding import BlockEncoding as CurrentBlockEncoding  # type: ignore  # noqa: E402
 from run_mcg_tool_raw_channel_lcu_benchmarks import (  # type: ignore  # noqa: E402
     json_default,
     qiskit_metrics,
@@ -64,6 +64,8 @@ from build_repetition_code_dqe_channel import (  # type: ignore  # noqa: E402
     pauli_dict_to_matrixsum,
 )
 from hypercube_channel_pauli import build_hypercube_section52_channel  # type: ignore  # noqa: E402
+
+from experiment_protocol import transpile_channel_circuit as transpile
 
 
 RESULT_ROOT = ROOT / "Baseline_results" / "block_encoding_new_qrisp_comparison_v1"
@@ -149,7 +151,7 @@ def summarize_basis(entry: dict[str, Any] | None) -> dict[str, Any] | None:
 def count_ours_block_encoding_new(ms: Any, out_dir: Path, prefix: str) -> dict[str, Any]:
     result: dict[str, Any] = {
         "method": "ours_block_encoding_new_current",
-        "class": "block_encoding_new.BlockEncoding",
+        "class": "block_encoding.BlockEncoding",
         "term_count": int(len(ms.instances)),
         "natural_width": int(natural_width(ms)),
         "rank_width_heuristic_env": os.environ.get("CHANNEL_LCU_ENABLE_RANK_WIDTH_HEURISTIC"),
@@ -257,7 +259,7 @@ def run_rewritten_benchmark(
         "policy": {
             "qrisp_input": "rewritten Kraus operator terms via BlockEncoding.from_lcu",
             "ours_input": "same rewritten Kraus operator terms",
-            "ours_class": "block_encoding_new.BlockEncoding",
+            "ours_class": "block_encoding.BlockEncoding",
             "sum_scope": "sum of per-Kraus block-encoding counts; no outer channel-LCU select/prepare",
         },
         "kraus_results": [],
@@ -648,7 +650,7 @@ def write_table(summary: dict[str, Any], md_path: Path, tex_path: Path) -> None:
         "# Current block_encoding_new Ours vs Qrisp",
         "",
         "Cells report `gates / non-Clifford / width` after Qiskit opt0 lowering.",
-        "Ours directly instantiates `block_encoding_new.BlockEncoding` and uses `circuit(opt=\"Matrix-order\")`.",
+        "Ours directly instantiates `block_encoding.BlockEncoding` and uses `circuit(opt=\"Matrix-order\")`.",
         "",
         "| example | basis | ours block_encoding_new | Qrisp | Qrisp/ours |",
         "| --- | --- | ---: | ---: | ---: |",

@@ -1,0 +1,14 @@
+{
+  "cases": [
+    "HRW-12"
+  ],
+  "worker_sha256": "50d4a175d137c56112627f8447d24805ee528ad06c92409fcca691342149259c",
+  "input_sha256": {
+    "HRW-12": "8b1354e92f0803195f6800d007c42033498a1ede0bd514b14c84ef78decaf896"
+  },
+  "frozen_manifest_sha256": "62dbfdfb0d2ec80b6e2e9a2590dadbdcd35dcbff40e74d9b2cf8496563972f5e",
+  "source_snapshot": "source_snapshot",
+  "scope": "fresh canonicalization, rewrite, assembly and IBM lowering; historical rewrite is not reused",
+  "scheduling": "repair HRW-12 driver only; HRW-4 and HRW-20 already succeeded; stop immediately after this one",
+  "local_smoke_result": "cases/HRW-12/ours_full_smoke_local/results.json"
+}

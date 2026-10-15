@@ -1,0 +1,1 @@
+../../../../scripts/build_random_channel_lcu_benchmark.py

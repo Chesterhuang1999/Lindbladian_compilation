@@ -1,0 +1,1 @@
+../../../../scripts/generate_table1_channel_lcu_qasm.py

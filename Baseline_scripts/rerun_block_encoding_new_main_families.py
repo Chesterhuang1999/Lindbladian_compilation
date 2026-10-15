@@ -25,7 +25,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
-from qiskit import qasm2, transpile
+from qiskit import qasm2
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -35,6 +35,8 @@ for candidate in (ROOT / "src", ROOT / "scripts", ROOT / "Baseline_scripts"):
 
 from baseline_common import count_qasm_file  # type: ignore  # noqa: E402
 from qasm_export import export_openqasm2_quartz_input  # type: ignore  # noqa: E402
+
+from experiment_protocol import transpile_channel_circuit as transpile
 
 
 DEFAULT_OUT_ROOT = (

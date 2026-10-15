@@ -1,0 +1,160 @@
+{
+  "input_kraus": [
+    [
+      [
+        "ZYYX",
+        1.4022150797159885,
+        0.0,
+        1.0
+      ],
+      [
+        "ZYZI",
+        0.9304962777294131,
+        1.0,
+        0.0
+      ],
+      [
+        "ZZXX",
+        1.2889467175443294,
+        -1.0,
+        0.0
+      ],
+      [
+        "YXYZ",
+        0.8697257926524288,
+        0.0,
+        -1.0
+      ],
+      [
+        "YZIZ",
+        1.468932869316235,
+        0.0,
+        -1.0
+      ],
+      [
+        "XZXI",
+        0.6776925857619811,
+        0.0,
+        1.0
+      ],
+      [
+        "IXXX",
+        1.1088516168445475,
+        0.0,
+        -1.0
+      ],
+      [
+        "ZZXY",
+        1.4428036791291672,
+        -1.0,
+        0.0
+      ],
+      [
+        "YIII",
+        1.1656574169657534,
+        0.0,
+        1.0
+      ],
+      [
+        "ZXYZ",
+        0.9978675987853745,
+        1.0,
+        0.0
+      ]
+    ],
+    [
+      [
+        "YIII",
+        1.4585822861092472,
+        0.0,
+        -1.0
+      ],
+      [
+        "IYIY",
+        0.8499373998222548,
+        0.0,
+        1.0
+      ]
+    ],
+    [
+      [
+        "IZYY",
+        1.1411709239650283,
+        0.0,
+        1.0
+      ],
+      [
+        "IZXI",
+        1.0820158006470457,
+        0.0,
+        -1.0
+      ]
+    ],
+    [
+      [
+        "IXXX",
+        0.9917252846124766,
+        0.0,
+        -1.0
+      ],
+      [
+        "ZYZZ",
+        1.1758008649335259,
+        0.0,
+        -1.0
+      ]
+    ],
+    [
+      [
+        "XZYY",
+        1.1925520447105606,
+        1.0,
+        0.0
+      ],
+      [
+        "IXZY",
+        0.6907885052585376,
+        1.0,
+        0.0
+      ]
+    ]
+  ],
+  "model": {
+    "model": "random_pauli_kraus_channel",
+    "kraus_count": 5,
+    "hilbert_dim": 16,
+    "system_qubits": 4,
+    "first_kraus_terms": 10,
+    "other_kraus_terms": 2,
+    "seed": 4,
+    "term_counts": [
+      10,
+      2,
+      2,
+      2,
+      2
+    ],
+    "coefficient_magnitude_distribution": "uniform[0.5,1.5)",
+    "coefficient_phase_distribution": "uniform over {1,-1,i,-i}",
+    "pauli_label_policy": "unique non-identity labels per Kraus operator",
+    "suite_case": "RandCh-N5-4q-seed4",
+    "input_policy": "second tuple parameter is system qubit count",
+    "input_validation": {
+      "passed": true,
+      "kraus_count": 5,
+      "system_qubits": 4,
+      "term_counts": [
+        10,
+        2,
+        2,
+        2,
+        2
+      ],
+      "hilbert_dim": 16
+    },
+    "builder_sources": {
+      "build_random_channel_lcu_benchmark.py": "49e0b427180cac8bd6540211a008363d2f22ad4f5f8ae4a5d715bb8b5521f87f"
+    },
+    "suite_builder_sha256": "61d597873c59398ee8178dbdf599e5d7d13e31a34842fedeb062b06048b537d7"
+  }
+}

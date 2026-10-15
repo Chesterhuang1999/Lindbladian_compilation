@@ -41,8 +41,9 @@ from build_random_channel_lcu_benchmark import (  # type: ignore  # noqa: E402
     RandomChannelSpec,
     build_random_kraus_ops,
 )
-from block_encoding_new import BlockEncoding as NewBlockEncoding  # type: ignore  # noqa: E402
+from block_encoding import BlockEncoding as NewBlockEncoding  # type: ignore  # noqa: E402
 from channel_IR import channel as ChannelIR  # type: ignore  # noqa: E402
+from experiment_protocol import rewrite_cache_paths
 from channel_IR import channel_ensemble  # type: ignore  # noqa: E402
 import channel_LCU  # type: ignore  # noqa: E402
 from run_cp2_hrw20_ablation import (  # type: ignore  # noqa: E402
@@ -68,9 +69,8 @@ from run_random_coloring_channel_lcu_ours_nam import (  # type: ignore  # noqa: 
 
 DEFAULT_OUT_DIR = ROOT / "Baseline_results" / "eval_redesign" / "cp2_rq2_main_ablation_random_examples"
 MATRIX_ORDER_NOTE = (
-    "Matrix-order uses block_encoding_new.BlockEncoding.circuit(opt='Matrix-order') "
-    "with expand_large_controlled_gates(..., if_optimize=True); single-term "
-    "Kraus blocks use opt='No' because no Matrix-order placement is needed."
+    "Matrix-order uses block_encoding.BlockEncoding with corrected residuals; "
+    "single-term blocks and block register mapping are handled by the shared backend."
 )
 
 
@@ -194,8 +194,10 @@ def ensure_raw_cache(args: argparse.Namespace, seed: int | None = None) -> tuple
     return kraus_ops, metrics
 
 
-def ensure_rewrite_cache(args: argparse.Namespace, seed: int | None = None) -> tuple[list[Any], dict[str, Any]]:
-    paths = cache_paths(args, seed)
+def ensure_rewrite_cache(args: argparse.Namespace, seed: int | None = None, *,
+                         structure: str = "tree") -> tuple[list[Any], dict[str, Any]]:
+    paths = rewrite_cache_paths(cache_paths(args, seed), structure=structure,
+                               beam_width=args.beam_width, max_steps=args.max_steps, tol=args.tol)
     if paths["rewrite_kraus"].exists() and paths["rewrite_summary"].exists():
         return load_pickle(paths["rewrite_kraus"]), read_json(paths["rewrite_summary"])
 
@@ -208,6 +210,7 @@ def ensure_rewrite_cache(args: argparse.Namespace, seed: int | None = None) -> t
         beam_width=args.beam_width,
         max_steps=args.max_steps,
         tol=args.tol,
+        structure=structure,
     )
     rewritten = ChannelIR(copy.deepcopy(raw_kraus_ops))
     rewritten.apply_rewrite_result(result, tol=args.tol)
@@ -225,8 +228,10 @@ def ensure_rewrite_cache(args: argparse.Namespace, seed: int | None = None) -> t
         "rewritten_channel_metrics": rewrite_metrics,
         "initial_support": int(result.get("initial_support", 0)),
         "final_support": int(result.get("final_support", 0)),
-        "initial_cost": int(result.get("initial_cost", 0)),
-        "final_cost": int(result.get("final_cost", 0)),
+        "cost_model": result["cost_model"],
+        "cost_settings": result["cost_settings"],
+        "initial_cost": float(result.get("initial_cost", 0)),
+        "final_cost": float(result.get("final_cost", 0)),
         "steps": int(len(result.get("steps", []))),
         "termination": result.get("termination", {}),
         "result": result,
@@ -246,87 +251,8 @@ def with_new_block_encoding(func):
 
 
 def build_config_circuit_random(kraus_ops: list[Any], cfg: ConfigSpec) -> tuple[Any, Any, float, dict[str, Any]]:
-    started = time.perf_counter()
-    block_timings: list[dict[str, Any]] = []
-    if not cfg.order:
-        def _build():
-            return channel_LCU.channel_to_LCU(
-                channel_ensemble([copy.deepcopy(kraus_ops)]),
-                structure=cfg.structure,
-                opt=cfg.opt,
-            )
-
-        old_block_encoding = channel_LCU.BlockEncoding
-        channel_LCU.BlockEncoding = timed_block_encoding_class(block_timings)
-        try:
-            qc, qubit_indexes = _build()
-        finally:
-            channel_LCU.BlockEncoding = old_block_encoding
-        build_time_s = time.perf_counter() - started
-        return qc, qubit_indexes, build_time_s, summarize_block_timings(block_timings, build_time_s)
-
-    sys_size = max(ms.size for ms in kraus_ops)
-    select_size = int(np.ceil(np.log2(len(kraus_ops))))
-    coeff_sums = [ms.pauli_norm() for ms in kraus_ops]
-    lcu_ini = channel_LCU.prep_sup_state(coeff_sums)
-    block_circuits = []
-    for ms in kraus_ops:
-        opt = "No" if len(ms.instances) <= 1 else "Matrix-order"
-        block_started = time.perf_counter()
-        block = NewBlockEncoding(copy.deepcopy(ms)).circuit(opt=opt)
-        block_elapsed = time.perf_counter() - block_started
-        block_timings.append(
-            {
-                "kraus_index": int(len(block_timings)),
-                "opt": opt,
-                "pauli_terms": int(len(ms.instances)),
-                "system_qubits": int(ms.size),
-                "time_sec": float(block_elapsed),
-                "output_qubits": int(block.num_qubits),
-            }
-        )
-        block_circuits.append(block)
-    ctrl_size = max(circ.num_qubits - sys_size for circ in block_circuits)
-
-    if cfg.structure == "basic":
-        from qiskit import QuantumCircuit, QuantumRegister
-
-        ctrl = QuantumRegister(ctrl_size, "c")
-        select = QuantumRegister(select_size, "s")
-        sys_reg = QuantumRegister(sys_size, "sys")
-        qc = QuantumCircuit(select, ctrl, sys_reg)
-        qc.compose(lcu_ini, qubits=list(range(select_size)), inplace=True)
-        for index, block in enumerate(block_circuits):
-            ctrl_value = bin(index)[2:].zfill(select_size)[::-1]
-            ctrl_size_ms = block.num_qubits - sys_size
-            controlled = block.to_gate().control(num_ctrl_qubits=select_size, ctrl_state=ctrl_value)
-            qc.append(controlled, qargs=list(select) + list(ctrl[:ctrl_size_ms]) + list(sys_reg))
-        qubit_indexes = [
-            list(range(ctrl_size)),
-            list(range(ctrl_size, ctrl_size + select_size)),
-            list(range(ctrl_size + select_size, ctrl_size + select_size + sys_size)),
-        ]
-    elif cfg.structure == "opt":
-        from qiskit import QuantumCircuit
-
-        qc = QuantumCircuit(2 * select_size + ctrl_size + sys_size)
-        select_indexes = [2 * j for j in range(select_size)]
-        anc_indexes = [2 * j + 1 for j in range(select_size)]
-        ctrl_indexes = list(range(2 * select_size, 2 * select_size + ctrl_size))
-        sys_indexes = list(range(2 * select_size + ctrl_size, 2 * select_size + ctrl_size + sys_size))
-        qc.compose(lcu_ini, qubits=select_indexes, inplace=True)
-        qc, _tcount, _mccount, _cxcount = channel_LCU.mulplex_U_opt(
-            qc,
-            block_circuits,
-            select_size,
-            ctrl_size,
-            sys_size,
-        )
-        qubit_indexes = [select_indexes, anc_indexes, ctrl_indexes, sys_indexes]
-    else:
-        raise ValueError(f"Unsupported structure: {cfg.structure}")
-    build_time_s = time.perf_counter() - started
-    return qc, qubit_indexes, build_time_s, summarize_block_timings(block_timings, build_time_s)
+    from run_cp2_hrw20_ablation import build_config_circuit
+    return build_config_circuit(kraus_ops, cfg)
 
 
 def metric_row(
@@ -459,7 +385,7 @@ def run_config(args: argparse.Namespace, cfg: ConfigSpec, seed: int | None = Non
         raw_kraus_ops, raw_metrics = ensure_raw_cache(args, seed)
         rewrite_summary = None
         if cfg.rewrite:
-            kraus_ops, rewrite_summary = ensure_rewrite_cache(args, seed)
+            kraus_ops, rewrite_summary = ensure_rewrite_cache(args, seed, structure=cfg.structure)
         else:
             kraus_ops = raw_kraus_ops
 
@@ -549,7 +475,7 @@ def record_timeout_row(args: argparse.Namespace, cfg: ConfigSpec, seed: int | No
     rewrite_summary = None
     if cfg.rewrite:
         try:
-            _, rewrite_summary = ensure_rewrite_cache(args, seed)
+            _, rewrite_summary = ensure_rewrite_cache(args, seed, structure=cfg.structure)
         except Exception:
             rewrite_summary = None
     row = metric_row(
@@ -997,7 +923,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--q", type=int, default=4)
     parser.add_argument("--graph", choices=("linear", "path", "cycle", "complete"), default="linear")
     parser.add_argument("--kraus-count", type=int, default=5)
-    parser.add_argument("--hilbert-dim", type=int, default=4)
+    size = parser.add_mutually_exclusive_group()
+    size.add_argument("--num-qubits", type=int, help="System qubits; recommended for new runs")
+    size.add_argument("--hilbert-dim", type=int, help="Explicit legacy Hilbert dimension")
     parser.add_argument("--first-kraus-terms", type=int, default=10)
     parser.add_argument("--other-kraus-terms", type=int, default=2)
     parser.add_argument("--seed", type=int, default=None)
@@ -1017,7 +945,20 @@ def parse_args() -> argparse.Namespace:
     subparsers.add_parser("prepare-rewrite", help="Build and cache the gatecost beam rewrite output.")
     subparsers.add_parser("run-all", help="Run every ablation configuration for this example.")
     subparsers.add_parser("aggregate", help="Aggregate per-config row files.")
-    return parser.parse_args()
+    args = parser.parse_args()
+    if args.example == "random-pauli":
+        if args.num_qubits is None and args.hilbert_dim is None:
+            parser.error("Specify --num-qubits explicitly for a new random experiment")
+        if args.num_qubits is not None:
+            spec = RandomChannelSpec.from_qubits(
+                kraus_count=args.kraus_count, num_qubits=args.num_qubits,
+                first_kraus_terms=args.first_kraus_terms, other_kraus_terms=args.other_kraus_terms,
+            )
+            args.hilbert_dim = spec.hilbert_dim
+        else:
+            args.num_qubits = RandomChannelSpec(args.kraus_count, args.hilbert_dim,
+                                               args.first_kraus_terms, args.other_kraus_terms).system_qubits
+    return args
 
 
 def main() -> None:

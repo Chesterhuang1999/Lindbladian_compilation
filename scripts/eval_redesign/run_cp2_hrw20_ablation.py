@@ -19,11 +19,9 @@ import platform
 import subprocess
 import sys
 import time
-from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from qiskit import transpile
 from qiskit.circuit import QuantumCircuit
 
 
@@ -35,7 +33,7 @@ for path in (SRC_DIR, BASELINE_DIR):
         sys.path.insert(0, str(path))
 
 from baseline_common import count_qasm_file  # type: ignore  # noqa: E402
-from block_encoding_new import BlockEncoding as NewBlockEncoding  # type: ignore  # noqa: E402
+from block_encoding import BlockEncoding as NewBlockEncoding  # type: ignore  # noqa: E402
 from channel_IR import channel as ChannelIR, channel_ensemble  # type: ignore  # noqa: E402
 from hypercube_channel_pauli import build_hypercube_section52_channel  # type: ignore  # noqa: E402
 import channel_LCU  # type: ignore  # noqa: E402
@@ -47,37 +45,10 @@ IBM_TRANSPILER_BASIS = ("u1", "u2", "u3", "cx", "reset")
 DEFAULT_OUT_DIR = ROOT / "Baseline_results" / "eval_redesign" / "cp2_rq2_main_ablation"
 
 
-@dataclass(frozen=True)
-class ConfigSpec:
-    name: str
-    rewrite: bool
-    flat: bool
-    order: bool
-    structure: str
-    opt: str
+from experiment_protocol import (ConfigSpec, CONFIGS, CONFIG_BY_NAME, CONFIG_BY_SLUG,
+                                 DEFAULT_TRANSPILE_SEED, rewrite_cache_paths)
 
-    @property
-    def slug(self) -> str:
-        return (
-            self.name.lower()
-            .replace("+", "_")
-            .replace(" ", "_")
-            .replace("__", "_")
-        )
-
-
-CONFIGS: tuple[ConfigSpec, ...] = (
-    ConfigSpec("Basic", False, False, False, "basic", "No"),
-    ConfigSpec("Rewrite only", True, False, False, "basic", "No"),
-    ConfigSpec("Flat only", False, True, False, "opt", "No"),
-    ConfigSpec("Order only", False, False, True, "basic", "Matrix-order"),
-    ConfigSpec("Rewrite + Flat", True, True, False, "opt", "No"),
-    ConfigSpec("Rewrite + Order", True, False, True, "basic", "Matrix-order"),
-    ConfigSpec("Flat + Order", False, True, True, "opt", "Matrix-order"),
-    ConfigSpec("Rewrite + Flat + Order", True, True, True, "opt", "Matrix-order"),
-)
-CONFIG_BY_NAME = {cfg.name: cfg for cfg in CONFIGS}
-CONFIG_BY_SLUG = {cfg.slug: cfg for cfg in CONFIGS}
+from experiment_protocol import transpile_channel_circuit as transpile
 
 
 def json_default(value: Any) -> Any:
@@ -177,8 +148,10 @@ def ensure_rewrite_cache(
     beam_width: int,
     max_steps: int,
     tol: float,
+    structure: str = "tree",
 ) -> tuple[list[Any], dict[str, Any]]:
-    paths = cache_paths(out_dir, n)
+    paths = rewrite_cache_paths(cache_paths(out_dir, n), structure=structure,
+                               beam_width=beam_width, max_steps=max_steps, tol=tol)
     if paths["rewrite_kraus"].exists() and paths["rewrite_summary"].exists():
         return load_pickle(paths["rewrite_kraus"]), read_json(paths["rewrite_summary"])
 
@@ -191,6 +164,7 @@ def ensure_rewrite_cache(
         beam_width=beam_width,
         max_steps=max_steps,
         tol=tol,
+        structure=structure,
     )
     rewritten = ChannelIR(copy.deepcopy(raw_kraus_ops))
     rewritten.apply_rewrite_result(result, tol=tol)
@@ -208,8 +182,10 @@ def ensure_rewrite_cache(
         "rewritten_channel_metrics": rewrite_metrics,
         "initial_support": int(result.get("initial_support", 0)),
         "final_support": int(result.get("final_support", 0)),
-        "initial_cost": int(result.get("initial_cost", 0)),
-        "final_cost": int(result.get("final_cost", 0)),
+        "cost_model": result["cost_model"],
+        "cost_settings": result["cost_settings"],
+        "initial_cost": float(result.get("initial_cost", 0)),
+        "final_cost": float(result.get("final_cost", 0)),
         "steps": int(len(result.get("steps", []))),
         "termination": result.get("termination", {}),
         "result": result,
@@ -273,20 +249,10 @@ def timed_block_encoding_class(block_timings: list[dict[str, Any]]):
 def build_config_circuit(kraus_ops: list[Any], cfg: ConfigSpec) -> tuple[QuantumCircuit, Any, float, dict[str, Any]]:
     started = time.perf_counter()
     block_timings: list[dict[str, Any]] = []
-
-    def _build():
-        return channel_LCU.channel_to_LCU(
-            channel_ensemble([copy.deepcopy(kraus_ops)]),
-            structure=cfg.structure,
-            opt=cfg.opt,
-        )
-
-    old_block_encoding = channel_LCU.BlockEncoding
-    channel_LCU.BlockEncoding = timed_block_encoding_class(block_timings)
-    try:
-        qc, qubit_indexes = _build()
-    finally:
-        channel_LCU.BlockEncoding = old_block_encoding
+    qc, qubit_indexes = channel_LCU.channel_to_LCU(
+        channel_ensemble([copy.deepcopy(kraus_ops)]), structure=cfg.structure, opt=cfg.opt,
+        block_encoding_cls=timed_block_encoding_class(block_timings),
+    )
     build_time_s = time.perf_counter() - started
     return qc, qubit_indexes, build_time_s, summarize_block_timings(block_timings, build_time_s)
 
@@ -302,6 +268,7 @@ def count_ibm_circuit(
         qc,
         basis_gates=list(IBM_TRANSPILER_BASIS),
         optimization_level=optimization_level,
+        seed_transpiler=DEFAULT_TRANSPILE_SEED,
     )
     transpile_time = time.perf_counter() - transpile_started
     export_meta = export_openqasm2_quartz_input(
@@ -415,7 +382,7 @@ def metric_row(
         "timeout": False,
         "qasm_path": "" if qasm_path is None else str(qasm_path),
         "qubit_indexes": qubit_indexes,
-        "notes": "Matrix-order uses block_encoding_new.BlockEncoding.circuit(opt='Matrix-order') with expand_large_controlled_gates(..., if_optimize=True)." if cfg.order else "",
+        "notes": "Matrix-order uses block_encoding.BlockEncoding.circuit(opt='Matrix-order') with expand_large_controlled_gates(..., if_optimize=True)." if cfg.order else "",
     }
     return row
 
@@ -443,6 +410,7 @@ def run_config(args: argparse.Namespace, cfg: ConfigSpec) -> dict[str, Any]:
                 beam_width=args.beam_width,
                 max_steps=args.max_steps,
                 tol=args.tol,
+                structure=cfg.structure,
             )
         else:
             kraus_ops = raw_kraus_ops
@@ -766,7 +734,7 @@ def aggregate(args: argparse.Namespace) -> None:
         "transpile_optimization_level": int(args.transpile_optimization_level),
         "rewrite_method": "gatecost_rewrite_search",
         "rewrite_strategy": "beam",
-        "matrix_order_guardrail": "block_encoding_new.BlockEncoding.circuit(opt='Matrix-order') calls expand_large_controlled_gates(..., if_optimize=True)",
+        "matrix_order_guardrail": "block_encoding.BlockEncoding.circuit(opt='Matrix-order') calls expand_large_controlled_gates(..., if_optimize=True)",
         "success": not known_failures,
         "known_failures": known_failures,
     }
@@ -778,7 +746,7 @@ def aggregate(args: argparse.Namespace) -> None:
         "- Benchmark: HRW_20 / hypercube random walk n=20.",
         "- Target/reporting basis: IBM `{u1,u2,u3,cx}` only; no NAM-vs-IBM preflight was run.",
         "- R uses `ChannelIR.gatecost_rewrite_search(strategy=\"beam\")`; this runner does not call `rewrite_search()`.",
-        "- Matrix-order uses `block_encoding_new.BlockEncoding.circuit(opt=\"Matrix-order\")`, whose SELECT path calls `expand_large_controlled_gates(..., if_optimize=True)`.",
+        "- Matrix-order uses `block_encoding.BlockEncoding.circuit(opt=\"Matrix-order\")`, whose SELECT path calls `expand_large_controlled_gates(..., if_optimize=True)`.",
         "- F denotes the adopted channel-level optimized outer SELECT / flattening-style pass, not a new contribution.",
         "- Every completed row records total gates, CX, non-Clifford count, width, depth, and total execution time.",
         "",

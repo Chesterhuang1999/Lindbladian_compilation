@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Any
 
 import numpy as np
-from qiskit import qasm2, transpile
+from qiskit import qasm2
 from qiskit.circuit import QuantumCircuit
 
 
@@ -25,11 +25,13 @@ if str(BASELINE_DIR) not in sys.path:
     sys.path.insert(0, str(BASELINE_DIR))
 
 from baseline_common import count_qasm_file  # type: ignore  # noqa: E402
-from block_encoding_new import BlockEncoding as NewBlockEncoding  # type: ignore  # noqa: E402
+from block_encoding import BlockEncoding as NewBlockEncoding  # type: ignore  # noqa: E402
 from channel_IR import channel as ChannelIR, channel_ensemble  # type: ignore  # noqa: E402
 from hypercube_channel_pauli import build_hypercube_section52_channel  # type: ignore  # noqa: E402
 import channel_LCU  # type: ignore  # noqa: E402
 from qasm_export import export_openqasm2_quartz_input  # type: ignore  # noqa: E402
+
+from experiment_protocol import transpile_channel_circuit as transpile
 
 
 NAM_BASIS = ("h", "x", "rz", "cx")
@@ -111,35 +113,15 @@ def build_channel_lcu_circuit(kraus_ops: list, *, structure: str, opt: str) -> t
 
 
 def build_rewrite_opt_matrix_order_circuit(kraus_ops: list) -> tuple[QuantumCircuit, Any, float]:
-    """Build channel-level ctrl-line + per-Kraus Matrix-order circuit."""
+    """Use the shared corrected backend and explicit tree outer selection."""
+    from channel_IR import channel_ensemble
+    import channel_LCU
+
     started = time.perf_counter()
-    sys_size = max(ms.size for ms in kraus_ops)
-    select_size = int(np.ceil(np.log2(len(kraus_ops))))
-    coeff_sums = [ms.pauli_norm() for ms in kraus_ops]
-
-    lcu_ini = channel_LCU.prep_sup_state(coeff_sums)
-    circuits = [
-        NewBlockEncoding(copy.deepcopy(ms)).circuit(opt="Matrix-order")
-        for ms in kraus_ops
-    ]
-    ctrl_size = max(circ.num_qubits - sys_size for circ in circuits)
-
-    qc = QuantumCircuit(2 * select_size + ctrl_size + sys_size)
-    select_indexes = [2 * j for j in range(select_size)]
-    anc_indexes = [2 * j + 1 for j in range(select_size)]
-    ctrl_indexes = list(range(2 * select_size, 2 * select_size + ctrl_size))
-    sys_indexes = list(range(2 * select_size + ctrl_size, 2 * select_size + ctrl_size + sys_size))
-
-    qc.compose(lcu_ini, qubits=select_indexes, inplace=True)
-    qc, _tcount, _mccount, _cxcount = channel_LCU.mulplex_U_opt(
-        qc,
-        circuits,
-        select_size,
-        ctrl_size,
-        sys_size,
+    qc, qubit_indexes = channel_LCU.channel_to_LCU(
+        channel_ensemble([copy.deepcopy(kraus_ops)]), structure="tree", opt="Matrix-order",
     )
-    elapsed = time.perf_counter() - started
-    return qc, [select_indexes, anc_indexes, ctrl_indexes, sys_indexes], elapsed
+    return qc, qubit_indexes, time.perf_counter() - started
 
 
 def dump_untranspiled_qasm(qc: QuantumCircuit, path: Path) -> None:
@@ -307,7 +289,7 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
     rows = [
         row_from_stats("Raw channel-LCU (memory -> NAM)", raw_nam_stats, None),
         row_from_stats("Rewrite channel-LCU (basic/no)", rewrite_nam_stats, rewrite_time + rewrite_build_time + rewrite_nam_time),
-        row_from_stats("Ours (rewrite + opt + matrix-order)", ours_nam_stats, ours_compile_time),
+        row_from_stats("Ours (rewrite + tree + matrix-order)", ours_nam_stats, ours_compile_time),
     ]
 
     summary = {
@@ -347,7 +329,9 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
             "stats": rewrite_nam_stats,
         },
         "ours": {
-            "structure": "opt",
+            "structure": "tree",
+            "block_backend": "block_encoding.BlockEncoding",
+            "qubits_initially_zero": False,
             "opt": "Matrix-order",
             "build_time_s": float(ours_build_time),
             "nam_transpile_time_s": float(ours_nam_time),
@@ -370,7 +354,7 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Run hypercube_random_walk_n4 channel-LCU rewrite+opt+matrix-order NAM statistics."
+        description="Run hypercube_random_walk_n4 channel-LCU rewrite+tree+matrix-order NAM statistics."
     )
     parser.add_argument("--num-qubits", type=int, default=4)
     parser.add_argument("--out-dir", type=Path, default=DEFAULT_OUT_DIR)

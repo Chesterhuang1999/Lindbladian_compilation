@@ -1,0 +1,1 @@
+../../../../Baseline_scripts/normalize_qasm_rz_for_voqc.py

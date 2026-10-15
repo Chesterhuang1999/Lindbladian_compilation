@@ -281,7 +281,8 @@ def prep_sup_state(coeffs: list) -> QuantumCircuit:
     qc.append(prep_gate, range(qubit_length))
     return qc
 
-def mulplex_U_opt(opt_circuit, circuits, ctrl_size, sub_ctrl_size, sys_size, gateable=True):
+def mulplex_U_opt(opt_circuit, circuits, ctrl_size, sub_ctrl_size, sys_size, gateable=True,
+                 *, controlled_circuits=None):
 
     from qiskit.circuit.library import XGate
     mccount = 0
@@ -293,6 +294,14 @@ def mulplex_U_opt(opt_circuit, circuits, ctrl_size, sub_ctrl_size, sys_size, gat
     # opt_circuit = QuantumCircuit(2 * ctrl_size + sub_circuit_size)
     sel_regs = [2 * j  for j in range(ctrl_size)]
     anc_regs = [2 * j + 1 for j in range(ctrl_size)]
+    if controlled_circuits is not None and len(controlled_circuits) != len(circuits):
+        raise ValueError("Each branch must have one controlled implementation.")
+
+    def append_branch(index, circ, qargs):
+        if controlled_circuits is None:
+            opt_circuit.append(circ.to_gate().control(1), qargs)
+        else:
+            opt_circuit.compose(controlled_circuits[index], qubits=qargs, inplace=True)
     # anc_regs = [2 * (ctrl_size - 1 - j) for j in range(ctrl_size)]
     # sel_regs = [2 * (ctrl_size - 1 - j) + 1 for j in range(ctrl_size)]
     def apply_left_enc(j):
@@ -337,7 +346,7 @@ def mulplex_U_opt(opt_circuit, circuits, ctrl_size, sub_ctrl_size, sys_size, gat
                 cxcount += cx_counts_per_ccx
 
             
-            opt_circuit.append(circ.to_gate().control(num_ctrl_qubits = 1, ctrl_state = '1'), 
+            append_branch(i, circ,
                                list(range(2 * ctrl_size - 1, 2 * ctrl_size + ctrl_numq)) + 
                                list(range(sys_start, sys_start + sys_size)))
             
@@ -358,7 +367,7 @@ def mulplex_U_opt(opt_circuit, circuits, ctrl_size, sub_ctrl_size, sys_size, gat
                     tcount += t_counts_per_ccx
                     cxcount += cx_counts_per_ccx
             
-            opt_circuit.append(circ.to_gate().control(num_ctrl_qubits = 1, ctrl_state = '1'), 
+            append_branch(i, circ,
                                list(range(2 * ctrl_size - 1, 2 * ctrl_size + ctrl_numq)) + 
                                list(range(sys_start, sys_start + sys_size)))
             mccount += sub_cxcount
@@ -380,7 +389,7 @@ def mulplex_U_opt(opt_circuit, circuits, ctrl_size, sub_ctrl_size, sys_size, gat
                     cxcount += cx_counts_per_ccx
             ## Apply the controlled circuit
             
-            opt_circuit.append(circ.to_gate().control(num_ctrl_qubits = 1, ctrl_state = '1'), 
+            append_branch(i, circ,
                                list(range(2 * ctrl_size - 1, 2 * ctrl_size + ctrl_numq)) + 
                                list(range(sys_start, sys_start + sys_size)))
             cxcount += sub_tcount
@@ -403,7 +412,8 @@ def mulplex_U_opt(opt_circuit, circuits, ctrl_size, sub_ctrl_size, sys_size, gat
     return opt_circuit, cxcount, tcount, mccount
 
 
-def mulplex_U_tree(opt_circuit, circuits, ctrl_size, sub_ctrl_size, sys_size):
+def mulplex_U_tree(opt_circuit, circuits, ctrl_size, sub_ctrl_size, sys_size,
+                  *, controlled_circuits=None):
     """
     Balanced-tree unary-iteration SELECT over a list of block circuits.
 
@@ -412,12 +422,18 @@ def mulplex_U_tree(opt_circuit, circuits, ctrl_size, sub_ctrl_size, sys_size):
     occupy odd positions ``1, 3, ...``, followed by the shared per-block
     control/work register and the system register.  The traversal mirrors
     Qrisp's ``q_switch(..., method="tree")`` pattern.
+
+    controlled_circuits optionally supplies an F* sandwich for each branch.
+    Returned resource proxies retain the legacy whole-block estimate; use
+    actual basis lowering for gate counts of either implementation.
     """
     mccount = 0
     tcount = 0
     cxcount = 0
     t_counts_per_ccx = 4
     cx_counts_per_ccx = 4
+    if controlled_circuits is not None and len(controlled_circuits) != len(circuits):
+        raise ValueError("Each branch must have one controlled implementation.")
 
     if len(circuits) == 0:
         return opt_circuit, cxcount, tcount, mccount
@@ -441,10 +457,10 @@ def mulplex_U_tree(opt_circuit, circuits, ctrl_size, sub_ctrl_size, sys_size):
             + list(range(2 * ctrl_size, 2 * ctrl_size + ctrl_numq))
             + list(range(sys_start, sys_start + sys_size))
         )
-        opt_circuit.append(
-            circ.to_gate().control(num_ctrl_qubits=1, ctrl_state='1'),
-            qargs,
-        )
+        if controlled_circuits is None:
+            opt_circuit.append(circ.to_gate().control(1), qargs)
+        else:
+            opt_circuit.compose(controlled_circuits[branch_index], qubits=qargs, inplace=True)
         cxcount += sub_tcount
         mccount += sub_cxcount
 

@@ -3,7 +3,9 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Iterable
 
-from qiskit import QuantumCircuit, qasm2, qasm3, transpile
+from qiskit import QuantumCircuit, qasm2, qasm3
+
+from experiment_protocol import transpile_channel_circuit as transpile
 
 
 DEFAULT_BASELINE_BASIS_GATES = ("u1", "u2", "u3", "cx", "reset")

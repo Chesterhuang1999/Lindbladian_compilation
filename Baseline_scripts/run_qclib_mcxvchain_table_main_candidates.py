@@ -31,7 +31,7 @@ for candidate in (ROOT / "src", ROOT / "scripts", ROOT / "Baseline_scripts", QCL
     if str(candidate) not in sys.path:
         sys.path.insert(0, str(candidate))
 
-from block_encoding_new import BlockEncoding as CurrentBlockEncoding  # type: ignore  # noqa: E402
+from block_encoding import BlockEncoding as CurrentBlockEncoding  # type: ignore  # noqa: E402
 from compare_tfim4_a0_select_qclib_mcxvchain_mode_a import (  # type: ignore  # noqa: E402
     append_row_phase_sidecar_qclib,
     apply_pauli_basis_sidecar,

@@ -225,4 +225,3 @@ class channels:
         system_size = self.qubit_regs[-1]
 
         return np.sum(self.qubit_regs) - system_size
-

@@ -1,0 +1,1 @@
+../../../../scripts/test_hypercube_channel_lcu.py

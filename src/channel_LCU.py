@@ -21,7 +21,7 @@ except ImportError:
     set_statevector = None
 from subroutine import *
 from channel_IR import *
-from block_encoding import BlockEncoding
+from block_encoding import BlockEncoding, system_last
 from baseline import simulate_lindblad
 from qutip import tensor, Qobj, basis
 
@@ -199,7 +199,8 @@ def multiplexed_B(ctrl_size:int, select_size: int, coeffs: list):
 
 
 
-def channel_to_LCU (ensem: channel_ensemble, structure = 'basic', opt = 'No') -> list:
+def channel_to_LCU (ensem: channel_ensemble, structure = 'basic', opt = 'No',
+                    *, block_encoding_cls=None, fstar=None) -> list:
     """
     Convert the channel to LCU circuit, only allow single channel for this method.
     
@@ -212,19 +213,58 @@ def channel_to_LCU (ensem: channel_ensemble, structure = 'basic', opt = 'No') ->
     s_j = sum_k a_{jk}
     Arguments: 
     ensem: length-1 channel_ensemble, channel: the only one channel
+    structure: 'basic' for independently controlled branches, 'opt' for
+        ctrl-line expansion, or 'tree' for balanced-tree expansion.
+    opt: independent inner block-encoding choice, e.g. 'No' or 'Matrix-order'.
+    block_encoding_cls: optional explicit factory, e.g. for timing or placement
+        settings. Defaults to the corrected experiment backend.
+    fstar: move PREPARE and its inverse outside each block's control, controlling
+        only SELECT. None enables this for opt/tree and leaves basic unchanged.
+        False explicitly reproduces the historical whole-block control.
 
     sys_size: size of |psi> the system
     select_size: size of |j> the select register
     ctrl_size : size of |0> the control qubit
     """
+    if structure not in ('basic', 'opt', 'tree'):
+        raise ValueError(f"Unsupported outer structure {structure!r}; use 'basic', 'opt', or 'tree'.")
+    if fstar is not None and type(fstar) is not bool:
+        raise ValueError("fstar must be True, False, or None (structure default).")
+    fstar = structure in ('opt', 'tree') if fstar is None else fstar
     assert len(ensem.channels) == 1
     
     channel = ensem.channels[0][1]
 
+    if not channel:
+        raise ValueError("channel_to_LCU requires at least one nonzero Kraus operator.")
     sys_size = max([ms.size for ms in channel])
     ## 2* select size is the count of Kraus operators (j)
     select_size = int(np.ceil(np.log2(len(channel))))
-    block_circuits = [BlockEncoding(ms).circuit(opt = opt) for ms in channel]
+    backend = BlockEncoding if block_encoding_cls is None else block_encoding_cls
+    controlled_blocks = None
+    if fstar and select_size:
+        components = [backend(ms).circuit_components(opt=opt).system_last(sys_size)
+                      for ms in channel]
+        # Lower outer controls together with Matrix-order residuals, before
+        # allocating the shared workspace. Keep clean expansion scratch out of
+        # every branch's address region, including branches with shorter LCUs.
+        address_widths = [getattr(parts, 'symbolic_address_qubits', None) for parts in components]
+        if any(width is not None for width in address_widths):
+            shared_address = max(width for width in address_widths if width is not None)
+            components = [parts.with_outer_control(
+                select_size if structure == 'basic' else 1,
+                shared_address_qubits=shared_address,
+            ) if width is not None else parts for parts, width in zip(components, address_widths)]
+        block_circuits = [parts.circuit for parts in components]
+        controlled_blocks = [
+            parts.controlled(
+                num_ctrl_qubits=select_size if structure == 'basic' else 1,
+                ctrl_state=bin(i)[2:].zfill(select_size)[::-1] if structure == 'basic' else None,
+            )
+            for i, parts in enumerate(components)
+        ]
+    else:
+        block_circuits = [system_last(backend(ms).circuit(opt=opt), sys_size) for ms in channel]
     ### 2**ctrl size is the count of Pauli terms (k) in each Kraus operator.  k indexes before j.
     ctrl_size = max([qc_be_ms.num_qubits - sys_size for qc_be_ms in block_circuits])
 
@@ -235,7 +275,7 @@ def channel_to_LCU (ensem: channel_ensemble, structure = 'basic', opt = 'No') ->
     sys = QuantumRegister(sys_size, 'sys')
     
     ## Prepare the superposition state 
-    LCU_ini = prep_sup_state(coeff_sums)
+    LCU_ini = prep_sup_state(coeff_sums) if select_size else QuantumCircuit(0)
     
     ## First construct elementary block encodings then select them using select register. 
     if structure == 'basic':
@@ -244,16 +284,24 @@ def channel_to_LCU (ensem: channel_ensemble, structure = 'basic', opt = 'No') ->
         qc = QuantumCircuit(select, ctrl, sys)
         qc.compose(LCU_ini, qubits=list(range(select_size)), inplace=True) 
         for i, qc_be_ms in enumerate(block_circuits):
+            if select_size == 0:
+                qc.compose(qc_be_ms, qubits=list(ctrl) + list(sys), inplace=True)
+                continue
             ctrl_value = bin(i)[2:].zfill(select_size)
             ctrl_v_rev = ctrl_value[::-1]
             # print(qc_be_ms.draw())
             ctrl_size_ms = qc_be_ms.num_qubits - sys_size
             # U_be_ms = qc_be_ms.to_gate().control(num_ctrl_qubits=select_size, ctrl_state=ctrl_value)
-            U_be_ms = qc_be_ms.to_gate().control(num_ctrl_qubits=select_size, ctrl_state=ctrl_v_rev)
-            qc.append(U_be_ms, qargs = list(select) + list(ctrl[:ctrl_size_ms]) + list(sys))
-            qubit_indexes = [list(range(ctrl_size)), list(range(ctrl_size, ctrl_size + select_size)), 
-                             list(range(ctrl_size + select_size, ctrl_size + select_size + sys_size))]
-    elif structure == 'opt':
+            targets = list(select) + list(ctrl[:ctrl_size_ms]) + list(sys)
+            if controlled_blocks is None:
+                U_be_ms = qc_be_ms.to_gate().control(num_ctrl_qubits=select_size, ctrl_state=ctrl_v_rev)
+                qc.append(U_be_ms, qargs=targets)
+            else:
+                qc.compose(controlled_blocks[i], qubits=targets, inplace=True)
+        qubit_indexes = [list(range(select_size, select_size + ctrl_size)),
+                         list(range(select_size)),
+                         list(range(ctrl_size + select_size, ctrl_size + select_size + sys_size))]
+    elif structure in ('opt', 'tree'):
         qc = QuantumCircuit(2 * select_size + ctrl_size + sys_size)
         
         select_indexes = [2 * j for j in range(select_size)]
@@ -261,8 +309,27 @@ def channel_to_LCU (ensem: channel_ensemble, structure = 'basic', opt = 'No') ->
         ctrl_indexes = list(range(2 * select_size, 2 * select_size + ctrl_size))
         sys_indexes = list(range(2 * select_size + ctrl_size, 2 * select_size + ctrl_size + sys_size))
         qc.compose(LCU_ini, qubits = select_indexes, inplace = True)
-        qc, tcount, mccount, cxcount = mulplex_U_tree(qc, block_circuits, select_size, ctrl_size , sys_size)
+        outer_select = mulplex_U_opt if structure == 'opt' else mulplex_U_tree
+        if select_size == 0:
+            qc.compose(block_circuits[0], qubits=ctrl_indexes + sys_indexes, inplace=True)
+        else:
+            qc, _, _, _ = outer_select(qc, block_circuits, select_size, ctrl_size, sys_size,
+                                      controlled_circuits=controlled_blocks)
         qubit_indexes = [select_indexes, anc_indexes, ctrl_indexes, sys_indexes]
+    qc.metadata = {
+        **(qc.metadata or {}),
+        'structure': structure,
+        'outer_select': {'basic': 'basic', 'opt': 'ctrl-line', 'tree': 'tree'}[structure],
+        'block_opt': opt,
+        'block_backend': f'{getattr(backend, "__module__", "")}.{getattr(backend, "__qualname__", type(backend).__qualname__)}',
+        'block_metadata': [qc.metadata for qc in block_circuits],
+        'alpha_per_kraus': [float(alpha) for alpha in coeff_sums],
+        'subnormalization_factor': float(subnorm),
+        'fstar': fstar,
+        'outer_control_scope': ('none' if not select_size else
+                                'select-only' if fstar else 'whole-block'),
+        'controlled_prepare': bool(select_size) and not fstar,
+    }
     return [qc, qubit_indexes]
 
 

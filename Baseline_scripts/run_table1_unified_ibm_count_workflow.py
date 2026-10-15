@@ -15,7 +15,7 @@ import time
 from pathlib import Path
 from typing import Any
 
-from qiskit import QuantumCircuit, transpile
+from qiskit import QuantumCircuit
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 ROOT = SCRIPT_DIR.parents[0]
@@ -27,13 +27,16 @@ for path in (SCRIPT_DIR, SCRIPTS_DIR, SRC_DIR):
 
 from baseline_common import count_qasm_file, require_input_qasm, write_summary  # noqa: E402
 from qasm_export import export_openqasm2_quartz_input  # noqa: E402
+from experiment_protocol import DEFAULT_TRANSPILE_SEED, EXTERNAL_NAM_OPTIMIZERS  # noqa: E402
 from test_table1 import build_tfim_lcu_select_circuit  # noqa: E402
+
+from experiment_protocol import transpile_channel_circuit as transpile
 
 
 CIRCUITS_ROOT = ROOT / "circuits"
 IBM_BASIS = ("u1", "u2", "u3", "cx")
 NAM_BASIS = ("h", "x", "rz", "cx")
-DEFAULT_TOOLS = ("voqc", "feynman", "wisq", "quartz", "pytket", "bqskit")
+DEFAULT_TOOLS = EXTERNAL_NAM_OPTIMIZERS
 CONDA_EXE = os.environ.get("CONDA_EXE", str(Path.home() / "miniconda3" / "bin" / "conda"))
 TOOL_BASIS = {
     "voqc": "nam",
@@ -339,7 +342,7 @@ def run_qiskit_opt3_external_input(
         "output_qasm = Path(sys.argv[2])\n"
         "basis_gates = tuple(sys.argv[3].split(','))\n"
         "qc = QuantumCircuit.from_qasm_file(str(input_qasm))\n"
-        "tqc = transpile(qc, basis_gates=list(basis_gates), optimization_level=3)\n"
+        f"tqc = transpile(qc, basis_gates=list(basis_gates), optimization_level=3, seed_transpiler={DEFAULT_TRANSPILE_SEED}, qubits_initially_zero=False)\n"
         "export_openqasm2_quartz_input(tqc, output_qasm, basis_gates=basis_gates)\n"
     )
     command = [
@@ -480,15 +483,15 @@ def build_inputs(args: argparse.Namespace, work_dir: Path) -> dict[str, Any]:
         input_source = "generated_in_memory"
         logical_stats = qiskit_stats(logical_qc)
 
-        ibm_opt0 = transpile(logical_qc, basis_gates=list(IBM_BASIS), optimization_level=0)
-        nam_opt0 = transpile(logical_qc, basis_gates=list(NAM_BASIS), optimization_level=0)
+        ibm_opt0 = transpile(logical_qc, basis_gates=list(IBM_BASIS), optimization_level=0, seed_transpiler=DEFAULT_TRANSPILE_SEED)
+        nam_opt0 = transpile(logical_qc, basis_gates=list(NAM_BASIS), optimization_level=0, seed_transpiler=DEFAULT_TRANSPILE_SEED)
         ibm_opt3 = (
-            transpile(logical_qc, basis_gates=list(IBM_BASIS), optimization_level=3)
+            transpile(logical_qc, basis_gates=list(IBM_BASIS), optimization_level=3, seed_transpiler=DEFAULT_TRANSPILE_SEED)
             if qiskit_opt3_requested(args, "ibm")
             else None
         )
         nam_opt3 = (
-            transpile(logical_qc, basis_gates=list(NAM_BASIS), optimization_level=3)
+            transpile(logical_qc, basis_gates=list(NAM_BASIS), optimization_level=3, seed_transpiler=DEFAULT_TRANSPILE_SEED)
             if qiskit_opt3_requested(args, "nam")
             else None
         )
@@ -760,7 +763,7 @@ def qiskit_recount_output(
     else:
         raise ValueError(f"Unsupported final count basis: {final_count_basis}")
 
-    tqc = transpile(qc, basis_gates=list(basis_gates), optimization_level=0)
+    tqc = transpile(qc, basis_gates=list(basis_gates), optimization_level=0, seed_transpiler=DEFAULT_TRANSPILE_SEED)
     export_openqasm2_quartz_input(tqc, counted_path, basis_gates=basis_gates)
     stats = count_qasm_file(counted_path, gate_set=final_count_basis)
     stats[f"qiskit_transpile_to_{final_count_basis}_opt_level"] = 0
@@ -1168,7 +1171,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--result-dir", default=str(ROOT / "Baseline_results" / "table1_unified"))
     parser.add_argument("--tools", nargs="+", choices=sorted(TOOL_BASIS), default=list(DEFAULT_TOOLS))
     parser.add_argument("--timeout", type=float, default=600.0)
-    parser.add_argument("--final-count-basis", choices=["ibm", "nam"], default="ibm")
+    parser.add_argument("--final-count-basis", choices=["ibm", "nam"], default="nam")
     parser.add_argument(
         "--skip-qiskit-opt3",
         action="store_true",
@@ -1177,7 +1180,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--qiskit-opt3-basis",
         choices=["both", "ibm", "nam", "final"],
-        default="both",
+        default="nam",
         help="Restrict qiskit-opt3 generation for external lowered inputs.",
     )
     parser.add_argument(

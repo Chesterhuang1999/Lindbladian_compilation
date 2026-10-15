@@ -152,7 +152,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--coherent-order", type=int, default=4)
     parser.add_argument("--coherent-opt", choices=("No", "Matrix-order"), default="No")
     parser.add_argument("--jump-opt", choices=("No", "Matrix-order"), default="No")
-    parser.add_argument("--structure", choices=("basic", "optimized"), default="basic")
+    parser.add_argument(
+        "--structure", choices=("basic", "opt", "tree", "optimized"), default="basic",
+        help="Outer SELECT: basic, opt (ctrl-line), tree; optimized is a legacy alias for opt.",
+    )
     parser.add_argument("--out-root", type=Path, default=DEFAULT_OUT_ROOT)
     parser.add_argument("--summary-root", type=Path, default=DEFAULT_SUMMARY_ROOT)
     parser.add_argument("--nam-optimization-level", type=int, default=0)

@@ -1,7 +1,0 @@
-{
-  "status": "completed",
-  "placement_bundle_id": "b_d12a875a8fe864eaa79b545f",
-  "missing_kraus_ids": [],
-  "effective_config_ref": "state.json#/bundles/b_d12a875a8fe864eaa79b545f/effective_config",
-  "termination": "completed"
-}

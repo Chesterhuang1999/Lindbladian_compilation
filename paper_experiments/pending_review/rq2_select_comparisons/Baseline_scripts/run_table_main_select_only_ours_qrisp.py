@@ -1,0 +1,1 @@
+../../../../Baseline_scripts/run_table_main_select_only_ours_qrisp.py

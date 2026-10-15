@@ -25,7 +25,7 @@ from statistics import mean
 from typing import Any
 
 import numpy as np
-from qiskit import qasm2, transpile
+from qiskit import qasm2
 from qiskit.circuit import QuantumCircuit
 
 
@@ -37,10 +37,13 @@ for path in (SRC_DIR, BASELINE_DIR):
         sys.path.insert(0, str(path))
 
 from baseline_common import count_qasm_file  # type: ignore  # noqa: E402
-from block_encoding_new import BlockEncoding as NewBlockEncoding  # type: ignore  # noqa: E402
+from block_encoding import BlockEncoding as NewBlockEncoding  # type: ignore  # noqa: E402
 from channel_IR import Matrixsum, PauliAtom, channel as ChannelIR, channel_ensemble  # type: ignore  # noqa: E402
 import channel_LCU  # type: ignore  # noqa: E402
 from qasm_export import export_openqasm2_quartz_input  # type: ignore  # noqa: E402
+from experiment_protocol import EXTERNAL_NAM_OPTIMIZERS
+
+from experiment_protocol import transpile_channel_circuit as transpile
 
 
 OUT_ROOT = ROOT / "Baseline_results" / "eval_redesign" / "random_channel_benchmarks"
@@ -56,7 +59,7 @@ IBM_TRANSPILER_BASIS = ("u1", "u2", "u3", "cx", "reset")
 
 NAM_TOOLS = ("voqc", "feynman", "wisq", "quartz")
 IBM_TOOLS = ("qiskit_opt3", "pytket", "bqskit")
-DEFAULT_EXTERNAL_TOOLS = ("voqc", "feynman", "wisq", "quartz", "pytket", "bqskit")
+DEFAULT_EXTERNAL_TOOLS = EXTERNAL_NAM_OPTIMIZERS
 DEFAULT_SPECS = ((5, 4, 10, 2), (9, 8, 20, 4))
 DEFAULT_SEEDS = (0, 1, 2, 3, 4)
 OK_STATUSES = {"ok", "ok_recount_only", "raw_ok", "ours_ok"}
@@ -68,6 +71,15 @@ class RandomChannelSpec:
     hilbert_dim: int
     first_kraus_terms: int
     other_kraus_terms: int
+
+    @classmethod
+    def from_qubits(cls, *, kraus_count, num_qubits, first_kraus_terms, other_kraus_terms):
+        from experiment_protocol import RandomChannelInput
+        value = RandomChannelInput(kraus_count=kraus_count, num_qubits=num_qubits,
+                                   first_kraus_terms=first_kraus_terms,
+                                   other_kraus_terms=other_kraus_terms, seed=0)
+        return cls(value.kraus_count, value.hilbert_dim,
+                   value.first_kraus_terms, value.other_kraus_terms)
 
     @property
     def system_qubits(self) -> int:
@@ -110,13 +122,23 @@ def build_random_matrixsum(
     term_count: int,
     rng: np.random.Generator,
 ) -> Matrixsum:
-    labels = all_pauli_labels(num_qubits, include_identity=False)
-    if term_count > len(labels):
+    label_count = 4 ** num_qubits - 1
+    if term_count > label_count:
         raise ValueError(
             f"Cannot draw {term_count} unique non-identity Pauli labels "
-            f"on {num_qubits} qubits; only {len(labels)} are available."
+            f"on {num_qubits} qubits; only {label_count} are available."
         )
-    chosen = rng.choice(np.array(labels, dtype=object), size=term_count, replace=False)
+    # Sample the same indices as choice(labels), without materializing 4**n
+    # Python strings. Base-four order is exactly the historical IXYZ order.
+    chosen_indices = rng.choice(label_count, size=term_count, replace=False)
+    chosen = []
+    for index in chosen_indices:
+        value = int(index) + 1  # Skip the all-identity word at index zero.
+        word = ["I"] * num_qubits
+        for position in range(num_qubits - 1, -1, -1):
+            word[position] = "IXYZ"[value % 4]
+            value //= 4
+        chosen.append("".join(word))
     phases = np.array([1.0 + 0.0j, -1.0 + 0.0j, 1.0j, -1.0j], dtype=complex)
     instances = []
     for label in chosen:
@@ -249,55 +271,15 @@ def compact_matrix_order_block_metadata(
 def build_ours_matrix_order_circuit(
     kraus_ops: list[Matrixsum],
 ) -> tuple[QuantumCircuit, Any, float]:
+    """Use the shared corrected backend and explicit tree outer selection."""
+    from channel_IR import channel_ensemble
+    import channel_LCU
+
     started = time.perf_counter()
-    sys_size = max(ms.size for ms in kraus_ops)
-    select_size = int(np.ceil(np.log2(len(kraus_ops))))
-    coeff_sums = [ms.pauli_norm() for ms in kraus_ops]
-    lcu_ini = channel_LCU.prep_sup_state(coeff_sums)
-
-    circuits = []
-    matrix_order_blocks = []
-    for index, ms in enumerate(kraus_ops):
-        block_encoding = NewBlockEncoding(copy.deepcopy(ms))
-        if len(ms.instances) <= 1:
-            circuit = block_encoding.circuit(opt="No")
-            selected_crit = "single-term-no-matrix-order"
-        else:
-            circuit = block_encoding.circuit(opt="Matrix-order")
-            selected_crit = None
-        circuits.append(circuit)
-        matrix_order_blocks.append(
-            compact_matrix_order_block_metadata(
-                index,
-                ms,
-                block_encoding,
-                circuit,
-                selected_crit_override=selected_crit,
-            )
-        )
-
-    ctrl_size = max(circ.num_qubits - sys_size for circ in circuits)
-    qc = QuantumCircuit(2 * select_size + ctrl_size + sys_size)
-    select_indexes = [2 * j for j in range(select_size)]
-    anc_indexes = [2 * j + 1 for j in range(select_size)]
-    ctrl_indexes = list(range(2 * select_size, 2 * select_size + ctrl_size))
-    sys_indexes = list(range(2 * select_size + ctrl_size, 2 * select_size + ctrl_size + sys_size))
-
-    qc.compose(lcu_ini, qubits=select_indexes, inplace=True)
-    qc, _tcount, _mccount, _cxcount = channel_LCU.mulplex_U_opt(
-        qc,
-        circuits,
-        select_size,
-        ctrl_size,
-        sys_size,
+    qc, qubit_indexes = channel_LCU.channel_to_LCU(
+        channel_ensemble([copy.deepcopy(kraus_ops)]), structure="tree", opt="Matrix-order",
     )
-    qc.metadata = {
-        "matrix_order_blocks": matrix_order_blocks,
-        "select_size": int(select_size),
-        "ctrl_size": int(ctrl_size),
-        "system_qubits": int(sys_size),
-    }
-    return qc, [select_indexes, anc_indexes, ctrl_indexes, sys_indexes], time.perf_counter() - started
+    return qc, qubit_indexes, time.perf_counter() - started
 
 
 def dump_qasm2(qc: QuantumCircuit, path: Path) -> None:
@@ -484,7 +466,9 @@ def build_case(args: argparse.Namespace, case: RandomChannelCase) -> dict[str, A
             "termination": rewrite_result.get("termination", {}),
         },
         "ours": {
-            "structure": "opt",
+            "structure": "tree",
+            "block_backend": "block_encoding.BlockEncoding",
+            "qubits_initially_zero": False,
             "opt": "Matrix-order",
             "build_time_s": float(ours_build_time),
             "qasm": str(ours_qasm),
@@ -1046,7 +1030,9 @@ def summarize(args: argparse.Namespace) -> list[dict[str, Any]]:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--spec", dest="spec_values", action="append", help="N,dim,N1,N2")
+    specs = parser.add_mutually_exclusive_group()
+    specs.add_argument("--spec", dest="spec_values", action="append", help="Legacy: N,hilbert_dim,N1,N2")
+    specs.add_argument("--qubit-spec", dest="qubit_spec_values", action="append", help="N,num_qubits,N1,N2")
     parser.add_argument("--seeds", nargs="+", type=int, default=list(DEFAULT_SEEDS))
     parser.add_argument("--out-root", type=Path, default=OUT_ROOT)
     parser.add_argument("--circuits-root", type=Path, default=CIRCUITS_ROOT)
@@ -1096,6 +1082,14 @@ def main() -> int:
     parser = build_parser()
     args = parser.parse_args()
     args.specs = parse_specs(args.spec_values)
+    if args.qubit_spec_values:
+        args.specs = []
+        for value in args.qubit_spec_values:
+            n, qubits, first, other = (int(part.strip()) for part in value.split(","))
+            spec = RandomChannelSpec.from_qubits(kraus_count=n, num_qubits=qubits,
+                                                first_kraus_terms=first, other_kraus_terms=other)
+            args.specs.append((spec.kraus_count, spec.hilbert_dim,
+                               spec.first_kraus_terms, spec.other_kraus_terms))
     args.out_root = Path(args.out_root).resolve()
     args.circuits_root = Path(args.circuits_root).resolve()
     args.results_md = Path(args.results_md).resolve()

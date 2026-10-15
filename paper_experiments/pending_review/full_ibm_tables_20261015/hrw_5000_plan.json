@@ -1,0 +1,34 @@
+{
+  "runner_sha256": "bacd7ad762b3b05995b4e056ed038c9698a2a269249f9e2fbbbc6a40f2e0ad41",
+  "frozen_manifest_sha256": "62dbfdfb0d2ec80b6e2e9a2590dadbdcd35dcbff40e74d9b2cf8496563972f5e",
+  "ours_worker_sha256": "2dcb0fdf4720caa8761db328af44bcd43ec27dea4c5c12c040630da95af6a3f1",
+  "timeout_s": 5000,
+  "timeout_scope": "worker wall clock including import, verification and export",
+  "excluded_case": "HRW-1440",
+  "saved_raw_hashes": {
+    "HRW-256": "6930b8d0b74ce59fd351d43d743113a52ca61b59dededf65eccc2e5ef45ad96a",
+    "HRW-512": "72259d6b97a47c9343ecdc9738e8febee247d06213786fa77a7d81047e32047f"
+  },
+  "jobs": [
+    {
+      "case": "HRW-1024",
+      "mode": "ours",
+      "output": "ours_full_remote_5000s"
+    },
+    {
+      "case": "HRW-256",
+      "mode": "opt3",
+      "output": "raw_opt3_remote_5000s"
+    },
+    {
+      "case": "HRW-1024",
+      "mode": "raw",
+      "output": "raw_full_remote_5000s"
+    },
+    {
+      "case": "HRW-512",
+      "mode": "opt3",
+      "output": "raw_opt3_remote_5000s"
+    }
+  ]
+}

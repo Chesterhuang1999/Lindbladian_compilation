@@ -80,15 +80,20 @@ class MatrixAtom(OperatorAtom):
 class Matrixsum:
     """
     Linear combination of OperatorAtom matrices.
+
+    Coefficients are nonnegative magnitudes; their phases are absorbed into
+    independent copies of the input atoms.
     """
 
     def __init__(self, instances = None):
-        self.instances = instances if instances is not None else []
-        for inst, coeff in self.instances: 
-            if not np.isreal(coeff) or coeff < 0: 
-                phase = coeff / abs(coeff)
-                inst.phase *= phase
-                coeff = abs(coeff)  
+        self.instances = []
+        for inst, coeff in (() if instances is None else instances):
+            # Copy each occurrence so repeated atoms do not share mutable phases.
+            normalized_inst = deepcopy(inst)
+            magnitude = abs(coeff)
+            if magnitude != 0:
+                normalized_inst.phase *= coeff / magnitude
+            self.instances.append((normalized_inst, magnitude))
         ## Assert that all instances have the same size
         if self.instances:
             self.size = self.instances[0][0].size
@@ -982,7 +987,8 @@ class channel:
     def gatecost_rewrite_search(self, strategy='beam', beam_width=8, max_steps=50,
                                 tol=1e-12, verbose=False, keep_neutral=False,
                                 max_neutral_candidates=3,
-                                skip_disjoint_pairs=True):
+                                skip_disjoint_pairs=True,
+                                cost_model="H_length_static_nc_v1", structure="tree", fstar=None):
         """
         Gate-cost-guided rewrite search using the H_length heuristic.
 
@@ -1006,6 +1012,7 @@ class channel:
             keep_neutral=keep_neutral,
             max_neutral_candidates=max_neutral_candidates,
             skip_disjoint_pairs=skip_disjoint_pairs,
+            cost_model=cost_model, structure=structure, fstar=fstar,
         )
 
     def _greedy_search(self, A, labels, m, initial_support, max_steps, tol, verbose):

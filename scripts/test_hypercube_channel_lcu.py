@@ -38,10 +38,10 @@ class CaseConfig:
 N_POINTS = [4,8, 12, 16, 20, 28]
 CASE_CONFIGS = [
     CaseConfig(name="basic+No", structure="basic", opt="No"),
-    CaseConfig(name="opt+No", structure="opt", opt="No"),
+    CaseConfig(name="tree+No", structure="tree", opt="No"),
     # User requested ('no', 'matrix-order'); map 'no' -> 'basic' as intended baseline.
     CaseConfig(name="basic+matrix-order", structure="basic", opt="Matrix-order"),
-    CaseConfig(name="opt+matrix-order", structure="opt", opt="Matrix-order"),
+    CaseConfig(name="tree+matrix-order", structure="tree", opt="Matrix-order"),
 ]
 
 

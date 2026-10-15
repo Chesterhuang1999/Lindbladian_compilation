@@ -1,0 +1,18 @@
+{
+  "cases": [
+    "HRW-4",
+    "HRW-12",
+    "HRW-20"
+  ],
+  "worker_sha256": "92239f18c87de6d85aac80c147d8a99f3aef485511913b271bd2e523a4fcf6c8",
+  "input_sha256": {
+    "HRW-4": "df85ae63a289335f43b92215d10052fbc325d63f5954d0a4a4c0f77237afd31f",
+    "HRW-12": "8b1354e92f0803195f6800d007c42033498a1ede0bd514b14c84ef78decaf896",
+    "HRW-20": "27bf179647b9581840a6996b8a40e98a2681cab11e3335276d60aa6aca0d1216"
+  },
+  "frozen_manifest_sha256": "62dbfdfb0d2ec80b6e2e9a2590dadbdcd35dcbff40e74d9b2cf8496563972f5e",
+  "source_snapshot": "source_snapshot",
+  "scope": "fresh canonicalization, rewrite, assembly and IBM lowering; historical rewrite is not reused",
+  "scheduling": "serial three-case check; stop after HRW-20; no remaining HRW dispatch",
+  "local_smoke_result": "cases/HRW-4/ours_full_smoke_local/results.json"
+}

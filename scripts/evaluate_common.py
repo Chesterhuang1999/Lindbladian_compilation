@@ -23,7 +23,7 @@ os.environ.setdefault("MPLCONFIGDIR", str(_CACHE_DIR / "matplotlib"))
 os.environ.setdefault("XDG_CACHE_HOME", str(_CACHE_DIR / "xdg"))
 
 import numpy as np
-from qiskit import QuantumCircuit, transpile
+from qiskit import QuantumCircuit
 from qiskit.quantum_info import DensityMatrix, SparsePauliOp, Statevector
 from qutip import Qobj, qeye, sigmam, sigmax, sigmaz, spre, spost, tensor, to_super
 
@@ -47,6 +47,8 @@ from series_expansion import (  # noqa: E402
     construct_circuit_coherent,
     construct_higher_order_circuit,
 )
+
+from experiment_protocol import transpile_channel_circuit as transpile
 
 
 def count_metrics(

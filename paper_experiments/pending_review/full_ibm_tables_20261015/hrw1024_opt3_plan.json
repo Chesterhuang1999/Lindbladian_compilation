@@ -1,0 +1,13 @@
+{
+  "runner_sha256": "3f029e5074102ac279a18539c04c08efda8a14238f5c163e0f5cabcbc7785708",
+  "frozen_manifest_sha256": "62dbfdfb0d2ec80b6e2e9a2590dadbdcd35dcbff40e74d9b2cf8496563972f5e",
+  "ours_worker_sha256": "2dcb0fdf4720caa8761db328af44bcd43ec27dea4c5c12c040630da95af6a3f1",
+  "saved_raw_hashes": {
+    "HRW-1024": "67f147db79fbe76fd0891cf624ac7532b0b4cf61c465744bbdd31b50d19c0d6b"
+  },
+  "saved_raw_result_sha256": "c847872c9ff959f0a08b96e795f47dbb6289cae1cf5d52d3e217150c62722c67",
+  "worker_timeout_s": 5000,
+  "worker_rss_gib": 128,
+  "minimum_available_gib": 32,
+  "launch_available_gib": 160
+}

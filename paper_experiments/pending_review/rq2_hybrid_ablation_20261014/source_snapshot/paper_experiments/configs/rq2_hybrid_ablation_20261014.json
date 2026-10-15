@@ -1,0 +1,96 @@
+{
+  "schema_version": 1,
+  "research_question": "RQ2",
+  "case_groups": [
+    {
+      "id": "TFIM-8",
+      "family": "tfim_first_order",
+      "system_qubits": 8,
+      "parameters": {
+        "delta_t": 0.1
+      }
+    },
+    {
+      "id": "HRW-20",
+      "family": "hrw",
+      "system_qubits": 20,
+      "parameters": {}
+    },
+    {
+      "id": "Thermal2_HO",
+      "family": "new_benchmark_fixture",
+      "system_qubits": 2,
+      "fixture": "paper_experiments/pending_review/new_benchmark_probe_20261009/Thermal2_HO.json"
+    },
+    {
+      "id": "Random-5K-4q-10-2",
+      "family": "random_pauli_kraus_channel",
+      "system_qubits": 4,
+      "parameters": {
+        "kraus_count": 5,
+        "num_qubits": 4,
+        "first_kraus_terms": 10,
+        "other_kraus_terms": 2,
+        "seeds": [
+          0,
+          1,
+          2,
+          3,
+          4
+        ]
+      }
+    }
+  ],
+  "configuration_order": [
+    "All",
+    "O_Fstar",
+    "R_Fstar",
+    "Fstar",
+    "R_O",
+    "O",
+    "R",
+    "Basic"
+  ],
+  "rewrite": {
+    "method": "support_frontier_two_seed_admit_support_v1",
+    "beam_width": 8,
+    "max_steps_minimum": 256,
+    "max_steps_rule": "max(256, initial_support_above_tol + 1)",
+    "timeout_per_search_s": 300,
+    "max_stagnant_support_layers": 32,
+    "tol": 1e-12,
+    "keep_neutral": true,
+    "max_neutral_candidates_per_pair": 3,
+    "support_rank": "support_rank",
+    "gate_rank": "admit_support",
+    "contexts": {
+      "basic": {
+        "structure": "basic",
+        "fstar": false
+      },
+      "tree": {
+        "structure": "tree",
+        "fstar": true
+      }
+    }
+  },
+  "lowering": {
+    "basis": "nam",
+    "optimization_level": 0,
+    "seed_transpiler": 20261009,
+    "qubits_initially_zero": false,
+    "downstream_optimizer": null
+  },
+  "resources": {
+    "jobs": 2,
+    "numerical_threads": 1,
+    "memory_limit_gib_per_worker": 24,
+    "compilation_timeout_s": 600,
+    "verification_timeout_s": 180,
+    "export_timeout_s": 120,
+    "rewrite_worker_timeout_s": 1800,
+    "import_timeout_s": 120,
+    "choi_max_system_qubits": 4,
+    "choi_max_total_qubits": 20
+  }
+}
